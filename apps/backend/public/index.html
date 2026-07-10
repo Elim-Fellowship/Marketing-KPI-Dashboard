@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Communications Intelligence Platform</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-mark">CI</div>
+          <div>
+            <h1>Communications Intelligence</h1>
+            <p>Airtable-powered analytics</p>
+          </div>
+        </div>
+        <nav class="nav-tabs" aria-label="Primary pages">
+          <button class="nav-tab active" data-page="overview" type="button">KPI Overview</button>
+          <button class="nav-tab" data-page="content" type="button">Top Performing Content</button>
+          <button class="nav-tab" data-page="channel-breakdown" type="button">Channel Breakdown</button>
+        </nav>
+        <div class="source-panel" id="source-panel"></div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Airtable Source Of Truth</p>
+            <h2 id="page-title">KPI Overview</h2>
+          </div>
+          <div class="status-pill" id="api-status">Loading</div>
+        </header>
+        <section id="page-root" class="page-root" aria-live="polite"></section>
+      </main>
+    </div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

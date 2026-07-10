@@ -1,0 +1,90 @@
+services:
+  - type: web
+    name: kpi-dashboard-backend
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: LOG_LEVEL
+        value: info
+      - key: AIRTABLE_RATE_LIMIT_MS
+        value: "250"
+      - key: AIRTABLE_CACHE_TTL_MS
+        value: "60000"
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: SYNC_API_KEY
+        sync: false
+      - key: AIRTABLE_PAT
+        sync: false
+      - key: AIRTABLE_BASE_ID
+        value: appkVACwRd625LQO8
+      - key: AIRTABLE_TABLE_KPI_SOURCES
+        value: KPI Sources
+      - key: AIRTABLE_TABLE_KPIS
+        value: KPIs
+      - key: AIRTABLE_TABLE_KPI_RECORDS
+        value: KPI Records
+      - key: AIRTABLE_TABLE_IMPORT_JOBS
+        value: Import Jobs
+      - key: AIRTABLE_TABLE_DASHBOARD_VIEWS
+        value: Dashboard Views
+      - key: AIRTABLE_TABLE_ALERTS
+        value: Alerts
+      - key: AIRTABLE_TABLE_SPOTIFY_WEEKLY_SNAPSHOT
+        value: Spotify_Weekly_Snapshot
+      - key: AIRTABLE_TABLE_CONTENT_PERFORMANCE
+        value: Content_Performance
+      - key: AIRTABLE_TABLE_KPI_HISTORY
+        value: KPI_History
+      - key: AIRTABLE_TABLE_DATA_SOURCE_STATUS
+        value: Data_Source_Status
+
+  - type: cron
+    name: kpi-dashboard-sync
+    runtime: node
+    plan: starter
+    rootDir: .
+    schedule: "*/30 * * * *"
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm run worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: AIRTABLE_RATE_LIMIT_MS
+        value: "250"
+      - key: AIRTABLE_CACHE_TTL_MS
+        value: "60000"
+      - key: AIRTABLE_PAT
+        sync: false
+      - key: AIRTABLE_BASE_ID
+        value: appkVACwRd625LQO8
+      - key: AIRTABLE_TABLE_KPI_SOURCES
+        value: KPI Sources
+      - key: AIRTABLE_TABLE_KPIS
+        value: KPIs
+      - key: AIRTABLE_TABLE_KPI_RECORDS
+        value: KPI Records
+      - key: AIRTABLE_TABLE_IMPORT_JOBS
+        value: Import Jobs
+      - key: AIRTABLE_TABLE_DASHBOARD_VIEWS
+        value: Dashboard Views
+      - key: AIRTABLE_TABLE_ALERTS
+        value: Alerts
+      - key: AIRTABLE_TABLE_SPOTIFY_WEEKLY_SNAPSHOT
+        value: Spotify_Weekly_Snapshot
+      - key: AIRTABLE_TABLE_CONTENT_PERFORMANCE
+        value: Content_Performance
+      - key: AIRTABLE_TABLE_KPI_HISTORY
+        value: KPI_History
+      - key: AIRTABLE_TABLE_DATA_SOURCE_STATUS
+        value: Data_Source_Status

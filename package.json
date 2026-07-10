@@ -1,0 +1,21 @@
+{
+  "name": "automated-kpi-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Automated KPI ingestion foundation with Airtable storage, Render jobs, and dashboard-ready APIs.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "dev": "npm --workspace @kpi-dashboard/backend run dev",
+    "sync": "npm --workspace @kpi-dashboard/backend run sync",
+    "verify": "npm --workspace @kpi-dashboard/backend run verify",
+    "build": "npm --workspace @kpi-dashboard/backend run build",
+    "start": "npm --workspace @kpi-dashboard/backend run start",
+    "worker": "npm --workspace @kpi-dashboard/backend run start:worker",
+    "check": "npm --workspaces run check"
+  }
+}
