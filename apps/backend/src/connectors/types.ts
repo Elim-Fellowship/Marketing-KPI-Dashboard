@@ -43,6 +43,7 @@ export interface ConnectorRunContext {
   startedAt: string;
   dryRun: boolean;
   requestedBy: "manual" | "scheduled" | "api";
+  csv?: string;
 }
 
 export interface ConnectorAuthResult {

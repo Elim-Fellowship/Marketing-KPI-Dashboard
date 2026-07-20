@@ -49,6 +49,14 @@ export interface AlertFields extends Record<string, unknown> {
   "Triggered At"?: string;
 }
 
+export interface SpotifyWeeklySnapshotFields extends Record<string, unknown> {
+  Date?: string;
+  Streams?: number;
+  Listeners?: number;
+  Followers?: number;
+  TopEpisode?: string;
+}
+
 export interface SpotifyEpisodeMetricsFields extends Record<string, unknown> {
   "Episode Name"?: string;
   "Publish Date"?: string;
@@ -230,6 +238,7 @@ export type AirtableTableKey =
   | "dashboardViews"
   | "alerts"
   | "spotifyWeeklySnapshot"
+  | "spotifyEpisodeMetrics"
   | "contentPerformance"
   | "kpiHistory"
   | "dataSourceStatus"

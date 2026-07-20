@@ -33,7 +33,7 @@ return {
   sourceType: result.connectorId,
   connectionStatus,
   lastUpdateDate: new Date().toISOString(),
-  notes: result.message,
+notes: result.errorMessage ?? "",
   };
 }
 

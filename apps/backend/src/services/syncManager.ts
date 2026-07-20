@@ -53,10 +53,10 @@ export class SyncManager {
   }
 
   getStatuses(): DataSourceStatusModel[] {
-    return [...this.statusesBySource.values()].sort((left, right) =>
-      right.lastSyncTime.localeCompare(left.lastSyncTime)
-    );
-  }
+  return [...this.statusesBySource.values()].sort((left, right) =>
+    right.lastUpdateDate.localeCompare(left.lastUpdateDate)
+  );
+ }
 
   getHistory(limit = 25): ConnectorSyncResult[] {
     return this.history.slice(-limit).reverse();
@@ -84,18 +84,7 @@ export class SyncManager {
         requestedBy
       };
       const result = await connector.sync(context);
-      if (result.data && connector.metadata.id === "spotify") {
-  for (const row of result.data) {
-await this.options.airtable.createRecord(
-  this.options.config.airtable.tables.spotifyWeeklySnapshot,
-      {
-        "Episode Name": row.episodeName,
-        "Total Streams": row.totalStreams,
-        "Publish Date": row.publishDate,
-      }
-    );
-  }
-}
+      
 
 const status = statusFromSyncResult(result, connector.metadata.mode !== "api");
 

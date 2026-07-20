@@ -105,10 +105,6 @@ spotifyEpisodeMetrics: readString(
   "AIRTABLE_TABLE_SPOTIFY_EPISODE_METRICS",
   "Spotify_Episode_Metrics"
 ),
-spotifyEpisodeMetrics: readString(
-  "AIRTABLE_TABLE_SPOTIFY_EPISODE_METRICS",
-  "Spotify_Episode_Metrics"
-),
         contentPerformance: readString(
           "AIRTABLE_TABLE_CONTENT_PERFORMANCE",
           "Content_Performance"
