@@ -1,16 +1,14 @@
-# Spotify Connector Architecture Reference
+# Spotify Integration Architecture Reference
 
 ## Purpose
 
 Spotify is the first completed platform integration for the Communications Intelligence Platform.
 
-The purpose of this integration was not simply to display Spotify analytics. It established the reusable backend connector pattern that future integrations will follow.
-
-The dashboard architecture must remain platform-independent.
+The goal was not simply to display Spotify analytics, but to establish the reusable architecture pattern that all future integrations will follow.
 
 ---
 
-# Final Data Architecture
+# Final Architecture
 
 External Platform
         ↓
@@ -24,54 +22,47 @@ KPI Services
         ↓
 Dashboard APIs
         ↓
-React Dashboard
+Frontend
 
 
-The frontend never communicates directly with external platforms.
+The frontend never communicates directly with Spotify.
 
-The frontend does not understand:
-
-- Spotify API structures
-- Airtable schemas
-- External platform response formats
-
-All transformation and normalization happens in backend services.
+The frontend does not understand Spotify API structures or Airtable schemas.
 
 ---
 
-# Spotify Integration Pattern
+# Spotify Data Flow
 
-Spotify data flows through the Spotify Connector.
+Spotify data enters through the Spotify Connector.
 
 The connector is responsible for:
 
-- Importing Spotify data
-- Reading source metrics
+- Authentication/import handling
+- Reading source data
 - Normalizing metrics
 - Returning standardized connector results
-- Writing data through backend services
 
-The backend owns all platform-specific complexity.
+The backend handles all transformation logic.
 
 ---
 
 # Airtable Structure
 
-Spotify uses dedicated Airtable tables because podcast analytics require a different data model than other communication channels.
+Spotify uses dedicated tables where platform-specific data requires unique structure.
 
 Current tables:
 
-## Spotify_Episode_Metrics
+Spotify_Episode_Metrics
 
 Stores:
 
 - Episode information
-- Episode performance metrics
-- Stream data
+- Streams
 - Listener metrics
+- Episode performance data
 
 
-## Spotify_Weekly_Snapshot
+Spotify_Weekly_Snapshot
 
 Stores:
 
@@ -80,33 +71,31 @@ Stores:
 - Reporting metrics
 
 
-The dashboard should never directly query these tables.
+The dashboard should not directly query these tables.
 
 ---
 
 # Important Architecture Decision
 
-Spotify originally attempted to use the generic Channel_Performance workflow.
+Spotify originally used the generic Channel_Performance workflow.
 
-This caused problems because podcast analytics are fundamentally different from social media analytics.
+This created issues because podcast metrics do not behave like social media metrics.
 
-The solution was not redesigning Airtable.
+The solution was NOT redesigning Airtable.
 
 Instead:
 
-Spotify received a dedicated backend data path while still returning standardized KPI objects.
+Spotify received its own backend data path while still exposing standardized KPI objects.
 
-This approach preserves compatibility with future integrations.
+This preserves compatibility with future platforms.
 
 ---
 
 # Connector Pattern
 
-Every future integration should follow this model.
+All future connectors should follow this model:
 
-## Connector Metadata
-
-Each connector defines:
+Connector Metadata
 
 - id
 - name
@@ -116,7 +105,7 @@ Each connector defines:
 - enabled
 
 
-## Connector Methods
+Connector Methods:
 
 fetchMetrics()
 
@@ -127,7 +116,7 @@ RawConnectorMetric[]
 
 transformData()
 
-Converts platform-specific data into normalized metrics.
+Converts raw metrics into normalized dashboard data.
 
 
 writeData()
@@ -137,73 +126,55 @@ Handles Airtable persistence.
 
 sync()
 
-Coordinates the complete connector workflow.
+Coordinates the complete workflow.
 
 ---
 
 # Lessons Learned
 
-## Do Not Force Every Platform Into One Table
+## Do not force every platform into one Airtable table
 
-Different communication channels measure different things.
+Different communication channels have different measurement models.
 
-Examples:
+Spotify episodes are fundamentally different from:
 
-Spotify:
-- Episodes
-- Streams
-- Listener retention
+- Email campaigns
+- Social posts
+- Website articles
 
-
-Mailchimp:
-- Campaigns
-- Opens
-- Clicks
-
-
-Social Media:
-- Posts
-- Reach
-- Engagement
-
-
-Each platform may require its own Airtable structure.
-
-The backend is responsible for creating consistency.
+Platform-specific storage is acceptable when the backend normalizes the output.
 
 ---
 
-# Backend Owns Complexity
+## Backend owns complexity
 
 The frontend should never contain:
 
 - Spotify-specific logic
 - Airtable field names
 - API response handling
-- Platform-specific calculations
 
-
-All complexity belongs inside backend services.
+All complexity belongs in backend services.
 
 ---
 
-# Future Spotify Enhancements
+# Future Spotify Improvements
 
-Remaining improvements:
+Remaining enhancements:
 
 - Historical trend series
 - Listener growth metrics
 - Activity volume tracking
 - Additional podcast KPIs
-- Improved episode ranking
+- Episode ranking improvements
 
 ---
 
-# Future Integration Template
+# Pattern For Future Integrations
 
-Future integrations should follow the same architecture:
+Mailchimp, Meta, Website Analytics, YouTube, and Castos should follow the same architecture.
 
-Each platform receives:
+Each platform gets:
 
 - Dedicated connector
 - Platform-specific import logic
@@ -211,15 +182,4 @@ Each platform receives:
 - Shared KPI calculations
 - Standard dashboard objects
 
-
-Future integrations:
-
-- Mailchimp
-- Meta
-- Website Analytics
-- YouTube
-- Castos
-- Buffer
-
-
-The dashboard should remain unchanged as new platforms are added.
+The dashboard remains unchanged.
