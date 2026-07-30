@@ -27,12 +27,17 @@ export class CommunicationsAnalyticsService {
   ) {}
 
   async getHomepage(): Promise<Record<string, unknown>> {
-    const [kpiHistory, contentPerformance, sourceStatus, spotify] = await Promise.all([
-      this.airtable.getRecords("kpiHistory"),
-      this.airtable.getRecords("contentPerformance"),
-      this.airtable.getRecords("dataSourceStatus"),
-      this.airtable.getRecords("spotifyEpisodeMetrics")    
+    const [kpiHistory, contentPerformance, sourceStatus, spotify, bufferPosts] = await    	Promise.all([
+  this.airtable.getRecords("kpiHistory"),
+  this.airtable.getRecords("contentPerformance"),
+  this.airtable.getRecords("dataSourceStatus"),
+  this.airtable.getRecords("spotifyEpisodeMetrics"),
+  this.airtable.getRecords("bufferPostMetrics")
 ]);
+
+console.log("BUFFER POSTS LOADED:", bufferPosts.length);
+console.log("BUFFER SAMPLE:", bufferPosts.slice(0, 2));
+
     const kpiModel = buildKpiModel(kpiHistory);
     const contentModel = buildTopContentModel(contentPerformance, {
       timeframe: "all",
@@ -124,9 +129,10 @@ export class CommunicationsAnalyticsService {
     );
     const kpiModel = buildKpiModel(filteredKpiHistory);
     const contentModel = buildTopContentModel(filteredContentPerformance, {
-      timeframe: "all",
-      platform: "all"
-    });
+  timeframe: "all",
+  platform: "all"
+});
+
     const overviewTrendSeries = buildOverviewTrendSeries(kpiModel.timeSeriesPerformanceData, filteredSpotify);
     const sourceStatus = status.map((record) => ({
       id: record.id,

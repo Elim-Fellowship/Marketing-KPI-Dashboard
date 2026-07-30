@@ -19,6 +19,14 @@ export interface AppConfig {
     apiBaseUrl?: string;
     configured: boolean;
   };
+
+  buffer: {
+  accessToken?: string;
+  apiBaseUrl?: string;
+  organizationId?: string;
+  configured: boolean;
+};
+
   airtable: {
     apiKey: string;
     baseId: string;
@@ -33,8 +41,9 @@ export interface AppConfig {
       dashboardViews: string;
       alerts: string;
       spotifyWeeklySnapshot: string;
-spotifyEpisodeMetrics: string;      
-contentPerformance: string;
+      spotifyEpisodeMetrics: string;
+      bufferPostMetrics: string;
+      contentPerformance: string;
       kpiHistory: string;
       dataSourceStatus: string;
       channelPerformance: string;
@@ -84,6 +93,15 @@ export function loadConfig(): AppConfig {
         readOptionalString("MAILCHIMP_AUDIENCE_ID")
       )
     },
+    buffer: {
+  accessToken: readOptionalString("BUFFER_ACCESS_TOKEN"),
+  apiBaseUrl: readOptionalString("BUFFER_API_BASE_URL"),
+  organizationId: readOptionalString("BUFFER_ORGANIZATION_ID"),
+  configured: Boolean(
+    readOptionalString("BUFFER_ACCESS_TOKEN")
+  )
+},
+
     airtable: {
       apiKey: airtableApiKey!,
       baseId: airtableBaseId!,
@@ -105,6 +123,11 @@ spotifyEpisodeMetrics: readString(
   "AIRTABLE_TABLE_SPOTIFY_EPISODE_METRICS",
   "Spotify_Episode_Metrics"
 ),
+        bufferPostMetrics: readString(
+          "AIRTABLE_TABLE_BUFFER_POST_METRICS",
+          "Buffer_Post_Metrics"
+        ),
+       
         contentPerformance: readString(
           "AIRTABLE_TABLE_CONTENT_PERFORMANCE",
           "Content_Performance"
@@ -126,6 +149,8 @@ spotifyEpisodeMetrics: readString(
     }
   };
 }
+
+
 
 function loadEnvFiles(): void {
   const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");

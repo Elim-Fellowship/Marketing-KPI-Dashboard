@@ -75,6 +75,21 @@ export interface SpotifyEpisodeMetricsFields extends Record<string, unknown> {
   "Import Date"?: string;
 }
 
+export interface BufferPostMetricsFields extends Record<string, unknown> {
+  "Source Record ID"?: string;
+  "Metric Name"?: string;
+  "Metric Value"?: number;
+  Unit?: string;
+  "Metric Date"?: string;
+  Platform?: string;
+  Channel?: string;
+  "Content Title"?: string;
+  "Content Type"?: string;
+  "Activity Volume"?: number;
+  "Metric Type"?: string;
+  "Channel ID"?: string;
+}
+
 export interface ContentPerformanceFields extends Record<string, unknown> {
   Title?: string;
   Name?: string;
@@ -239,6 +254,7 @@ export type AirtableTableKey =
   | "alerts"
   | "spotifyWeeklySnapshot"
   | "spotifyEpisodeMetrics"
+  | "bufferPostMetrics"
   | "contentPerformance"
   | "kpiHistory"
   | "dataSourceStatus"
@@ -252,7 +268,8 @@ export interface AirtableTableRecordMap {
   dashboardViews: DashboardViewFields;
   alerts: AlertFields;
   spotifyWeeklySnapshot: SpotifyWeeklySnapshotFields;
-spotifyEpisodeMetrics: SpotifyEpisodeMetricsFields;  
+spotifyEpisodeMetrics: SpotifyEpisodeMetricsFields; 
+bufferPostMetrics: BufferPostMetricsFields; 
 contentPerformance: ContentPerformanceFields;
   kpiHistory: KpiHistoryFields;
   dataSourceStatus: DataSourceStatusFields;

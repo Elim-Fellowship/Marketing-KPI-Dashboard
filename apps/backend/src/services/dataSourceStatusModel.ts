@@ -29,7 +29,7 @@ export function statusFromSyncResult(
       : "Error";
 
 return {
-  sourceName: "Spotify",
+  sourceName: result.sourceName,
   sourceType: result.connectorId,
   connectionStatus,
   lastUpdateDate: new Date().toISOString(),

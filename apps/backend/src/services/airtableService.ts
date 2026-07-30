@@ -9,6 +9,7 @@ import type {
 type RequestedAirtableTableKey = Exclude<AirtableTableKey, "dataSourceStatus">;
 type CommunicationsTableKey =
   | "spotifyWeeklySnapshot"
+  | "bufferPostMetrics"
   | "contentPerformance"
   | "kpiHistory"
   | "dataSourceStatus"
@@ -72,13 +73,14 @@ export class AirtableService {
 
   async getCommunicationsTables(): Promise<Record<CommunicationsTableKey, Array<NormalizedAirtableRecord<Record<string, unknown>>>>> {
     const keys: CommunicationsTableKey[] = [
-      "spotifyWeeklySnapshot",
-      "contentPerformance",
-      "kpiHistory",
-      "dataSourceStatus",
-      "channelPerformance",
-      "monthlyActivitySummary"
-    ];
+  "spotifyWeeklySnapshot",
+  "bufferPostMetrics",
+  "contentPerformance",
+  "kpiHistory",
+  "dataSourceStatus",
+  "channelPerformance",
+  "monthlyActivitySummary"
+];
 
     const entries = await Promise.all(
       keys.map(async (key) => [key, await this.getRecords(key)] as const)

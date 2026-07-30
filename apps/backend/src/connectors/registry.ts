@@ -1,4 +1,5 @@
 import { CastosConnector } from "./castosConnector.js";
+import { BufferConnector } from "./bufferConnector.js";
 import { MailchimpConnector } from "./mailchimpConnector.js";
 import { SpotifyConnector } from "./spotifyConnector.js";
 import type { CommunicationsConnector, ConnectorMetadata } from "./types.js";
@@ -11,7 +12,8 @@ export function createIngestionConnectors(): CommunicationsConnector[] {
     new CastosConnector(),
     new YouTubeConnector(),
     new WebsiteConnector(),
-    new SpotifyConnector()
+    new SpotifyConnector(),
+    new BufferConnector()
   ];
 }
 

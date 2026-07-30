@@ -170,6 +170,7 @@ export abstract class BaseConnector implements CommunicationsConnector {
 
     return {
       uniqueKey: uniqueParts.join(":").toLowerCase().replace(/\s+/g, "-"),
+      sourceRecordId: metric.sourceRecordId,
       connectorId: this.metadata.id,
       sourceName: this.metadata.sourceName,
       metricName: metric.metricName,
@@ -188,6 +189,10 @@ export abstract class BaseConnector implements CommunicationsConnector {
   }
 
   protected toAirtableRecord(metric: NormalizedConnectorMetric): ConnectorAirtableRecord {
+    if (metric.targetTableKey === "bufferPostMetrics") {
+       return toBufferAirtableRecord(metric);
+    }
+
     return {
       tableKey: metric.targetTableKey,
       uniqueKey: {
@@ -212,6 +217,30 @@ export abstract class BaseConnector implements CommunicationsConnector {
       })
     };
   }
+}
+
+function toBufferAirtableRecord(metric: NormalizedConnectorMetric): ConnectorAirtableRecord {
+  return {
+    tableKey: metric.targetTableKey,
+    uniqueKey: {
+      fieldName: "Source Record ID",
+      value: metric.sourceRecordId ?? metric.uniqueKey
+    },
+    fields: removeUndefined({
+      "Source Record ID": metric.sourceRecordId ?? metric.uniqueKey,
+      "Metric Name": metric.metricName,
+      "Metric Value": metric.value,
+      Unit: metric.unit,
+      "Metric Date": metric.date,
+      Platform: metric.platform,
+      Channel: metric.channel,
+      "Content Title": metric.contentTitle,
+      "Content Type": metric.contentType,
+      "Activity Volume": metric.activityVolume,
+      "Metric Type": metric.dimensions?.metricType,
+      "Channel ID": metric.dimensions?.channelId
+    })
+  };
 }
 
 function metricSpecificFields(metric: NormalizedConnectorMetric): AirtableFields {

@@ -10,7 +10,8 @@ export type ConnectorId =
   | "website"
   | "spotify"
   | "facebook"
-  | "instagram";
+  | "instagram"
+  | "buffer";
 
 export type ConnectorCategory =
   | "email"
@@ -70,6 +71,7 @@ export interface RawConnectorMetric {
 
 export interface NormalizedConnectorMetric {
   uniqueKey: string;
+  sourceRecordId?: string;
   connectorId: ConnectorId;
   sourceName: string;
   metricName: string;
