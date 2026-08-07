@@ -91,6 +91,16 @@ export interface BufferPostMetricsFields extends Record<string, unknown> {
 }
 
 export interface ContentPerformanceFields extends Record<string, unknown> {
+  "Unique Key"?: string;
+  "Source Record ID"?: string;
+  "Source Name"?: string;
+  "Source Table"?: string;
+  "Metric Label"?: string;
+  "Metric Unit"?: string;
+  "Metric Value"?: number;
+  "Content ID"?: string;
+  "Content Title"?: string;
+  "Source Platform"?: string;
   Title?: string;
   Name?: string;
   Platform?: string;
