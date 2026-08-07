@@ -134,6 +134,27 @@ export function createApp(config: AppConfig, logger: Logger): express.Express {
     });
   });
 
+  app.get("/api/integrations/buffer/test", asyncHandler(async (_request, response) => {
+    const result = await ingestionSyncManager.run({
+      connectorId: "buffer",
+      dryRun: true,
+      requestedBy: "api"
+    });
+    const bufferResult = result.results[0];
+
+    response.setHeader("Cache-Control", "no-store");
+    response.json({
+      ok: bufferResult?.status === "Success",
+      configured: config.buffer.configured,
+      status: bufferResult?.status ?? "Failed",
+      metricsFetched: bufferResult?.metricsFetched ?? 0,
+      recordsPrepared: bufferResult?.recordsPrepared ?? 0,
+      durationMs: bufferResult?.durationMs ?? 0,
+      errorMessage: bufferResult?.errorMessage ?? null,
+      writesPerformed: false
+    });
+  }));
+
   app.get("/api/debug/sync-auth", (_request, response) => {
     response.json({
       syncApiKeyConfigured: Boolean(config.syncApiKey),
