@@ -75,6 +75,10 @@ export interface ScoredContentItem {
   type: string;
   metricLabel: string;
   metricValue: number;
+  metricUnit?: string;
+  sourceName?: string;
+  sourceTable?: string;
+  sourceRecordId?: string;
   contentScore: number;
   scoreAvailable: boolean;
   rank: number;
@@ -190,6 +194,7 @@ export function buildTopContentModel(
     videos: ScoredContentItem[];
   };
   topOverall: ScoredContentItem[];
+  totalRankedItems: number;
   groups: Array<{
     groupType: ContentGroupBy;
     groupName: string;
@@ -227,6 +232,7 @@ export function buildTopContentModel(
       videos: items.filter((item) => item.type === "video").slice(0, 8)
     },
     topOverall: items.slice(0, 12),
+    totalRankedItems: items.length,
     groups: groupContentItems(items, groupBy)
   };
 }
@@ -465,6 +471,10 @@ interface RawContentItem {
   airtableScore?: number;
   scoreAvailable: boolean;
   metricLabel: string;
+  metricUnit?: string;
+  sourceName?: string;
+  sourceTable?: string;
+  sourceRecordId?: string;
 }
 
 function toRawContentItem(record: NormalizedAirtableRecord<Fields>): RawContentItem {
@@ -498,7 +508,11 @@ function toRawContentItem(record: NormalizedAirtableRecord<Fields>): RawContentI
     airtableRank: rankField ? numberField(record.fields, [rankField]) : undefined,
     airtableScore: scoreField ? numberField(record.fields, [scoreField]) : undefined,
     scoreAvailable: scoreField !== undefined,
-    metricLabel
+    metricLabel,
+    metricUnit: stringField(record.fields, ["Metric Unit", "Unit"], ""),
+    sourceName: stringField(record.fields, ["Source Name", "Source", "Source Platform"], ""),
+    sourceTable: stringField(record.fields, ["Source Table"], ""),
+    sourceRecordId: stringField(record.fields, ["Source Record ID", "Unique Key", "Content ID"], "")
   };
 }
 
@@ -514,6 +528,10 @@ function rankContentItems(rawItems: RawContentItem[]): ScoredContentItem[] {
         type: item.type,
         metricLabel: item.metricLabel,
         metricValue: contentScore,
+        metricUnit: item.metricUnit,
+        sourceName: item.sourceName,
+        sourceTable: item.sourceTable,
+        sourceRecordId: item.sourceRecordId,
         contentScore,
         scoreAvailable: item.scoreAvailable,
         rank: item.airtableRank && item.airtableRank > 0 ? item.airtableRank : 0,
