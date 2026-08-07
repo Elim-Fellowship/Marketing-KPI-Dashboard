@@ -232,38 +232,47 @@ console.log("BUFFER SAMPLE:", bufferPosts.slice(0, 2));
     endDate?: string;
     dateMode?: string;
   } = {}): Promise<Record<string, unknown>> {
-    const channelPerformance = await this.airtable.getRecords("channelPerformance", {
-      maxRecords: 1000
-    });
-const spotifySnapshots = await this.airtable.getRecords("spotifyEpisodeMetrics", {
-  maxRecords: 1000
-});
+    const [channelPerformance, contentPerformance, kpiHistory, spotifySnapshots] = await Promise.all([
+      this.airtable.getRecords("channelPerformance", { maxRecords: 1000 }),
+      this.airtable.getRecords("contentPerformance", { maxRecords: 1000 }),
+      this.airtable.getRecords("kpiHistory", { maxRecords: 1000 }),
+      this.airtable.getRecords("spotifyEpisodeMetrics", { maxRecords: 1000 })
+    ]);
     const dateRange = normalizeDateRange(query.startDate, query.endDate, query.dateMode);
     const previousDateRange = previousEquivalentDateRange(dateRange);
-    const currentRows = filterRecordsByDate(
-      channelPerformance,
-      CHANNEL_PERFORMANCE_DATE_FIELDS,
-      dateRange
-    );
-const currentSpotifyRows = filterRecordsByDate(
-  spotifySnapshots,
-  SPOTIFY_DATE_FIELDS,
-  dateRange
-);
+    const currentRows = filterRecordsByDate(channelPerformance, CHANNEL_PERFORMANCE_DATE_FIELDS, dateRange);
     const previousRows = filterRecordsByDate(
       channelPerformance,
       CHANNEL_PERFORMANCE_DATE_FIELDS,
       previousDateRange
     );
-const channels = CHANNEL_DEFINITIONS.map((definition) =>
-  definition.key === "spotify"
-    ? buildChannelPerformanceFromRows(
+    const currentContent = filterRecordsByDate(contentPerformance, CONTENT_PERFORMANCE_DATE_FIELDS, dateRange);
+    const previousContent = filterRecordsByDate(
+      contentPerformance,
+      CONTENT_PERFORMANCE_DATE_FIELDS,
+      previousDateRange
+    );
+    const currentKpiHistory = filterRecordsByDate(kpiHistory, KPI_HISTORY_DATE_FIELDS, dateRange);
+    const previousKpiHistory = filterRecordsByDate(kpiHistory, KPI_HISTORY_DATE_FIELDS, previousDateRange);
+    const currentSpotifyRows = filterRecordsByDate(spotifySnapshots, SPOTIFY_DATE_FIELDS, dateRange);
+    const previousSpotifyRows = filterRecordsByDate(spotifySnapshots, SPOTIFY_DATE_FIELDS, previousDateRange);
+
+    const channels = CHANNEL_DEFINITIONS.map((definition) => {
+      const canonical = buildChannelPerformanceFromRows(definition, currentRows, previousRows);
+      if (canonical.hasData) {
+        return canonical;
+      }
+
+      return buildChannelComparison(
         definition,
-        [...currentRows, ...currentSpotifyRows],
-        previousRows
-      )
-    : buildChannelPerformanceFromRows(definition, currentRows, previousRows)
-);
+        currentContent,
+        previousContent,
+        currentKpiHistory,
+        previousKpiHistory,
+        currentSpotifyRows,
+        previousSpotifyRows
+      );
+    });
     const channelsWithData = channels.filter((channel) => channel.hasData);
     const currentTotal = channelsWithData.reduce((sum, channel) => sum + channel.metricValue, 0);
     const previousTotal = channelsWithData.reduce((sum, channel) => sum + channel.previousMetricValue, 0);
@@ -341,6 +350,8 @@ const CHANNEL_TEXT_FIELDS = [
   "Platform",
   "Channel",
   "Source Name",
+  "Source",
+  "Source Platform",
   "Content Type",
   "Type",
   "Format",
@@ -409,7 +420,7 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
     key: "email",
     label: "Email",
     metricLabel: "Clicks",
-    aliases: ["email"],
+    aliases: ["email", "mailchimp", "newsletter"],
     excludeAliases: ["voice of elim", "elim updates"],
     metricFields: ["Clicks", "Link Clicks", "Email Clicks", "Total Clicks"],
     metricTerms: ["clicks", "click"],
@@ -581,8 +592,11 @@ function buildChannelComparison(
     activityVolume: current.activityVolume,
     metricValue: current.metricValue,
     previousMetricValue: previous.metricValue,
-    changePercent: calculatePercentChange(current.metricValue, previous.metricValue),
+    changePercent: current.hasData
+      ? calculatePercentChange(current.metricValue, previous.metricValue)
+      : undefined,
     source: current.source,
+    hasData: current.hasData,
     series: current.series
   };
 }
@@ -751,30 +765,61 @@ function measureChannel(
   activityVolume: number;
   metricValue: number;
   source: string;
+  hasData: boolean;
   series: Array<{ date: string; value: number }>;
 } {
   const contentRecords = contentPerformance.filter((record) => recordMatchesChannel(record.fields, definition));
+  const contentMetricRecords = contentRecords.filter((record) => contentRecordHasChannelMetric(record.fields, definition));
   const kpiRecords = kpiHistory.filter((record) => kpiRecordMatchesChannel(record.fields, definition));
-  const contentMetricValue = sumRecordMetrics(contentRecords, definition.metricFields);
+  const spotifyRecords = definition.includeSpotifySnapshot ? spotify : [];
+
+  const contentMetricValue = sumContentChannelMetrics(contentMetricRecords, definition);
   const kpiMetricValue = sumKpiChannelMetrics(kpiRecords, definition);
-const spotifyMetricValue = definition.includeSpotifySnapshot
-  ? sumRecordMetrics(spotify, ["Total Streams", "Streams", "Plays", "Value"])
-  : 0;
-  const sourceValues = [
-{ source: "Spotify_Episode_Metrics", value: spotifyMetricValue, enabled: definition.includeSpotifySnapshot },
-    { source: "Content_Performance", value: contentMetricValue, enabled: true },
-    { source: "KPI_History", value: kpiMetricValue, enabled: true }
-  ].filter((item) => item.enabled && item.value > 0);
-  const selected = sourceValues[0] ?? { source: "No matching source rows", value: 0 };
+  const spotifyMetricValue = definition.includeSpotifySnapshot
+    ? sumRecordMetrics(spotifyRecords, ["Total Streams", "Streams", "Plays", "Value"])
+    : 0;
+
+  const sourceCandidates = [
+    { source: "Spotify_Episode_Metrics", value: spotifyMetricValue, hasRows: spotifyRecords.length > 0 },
+    { source: "Content_Performance", value: contentMetricValue, hasRows: contentMetricRecords.length > 0 },
+    { source: "KPI_History", value: kpiMetricValue, hasRows: kpiRecords.length > 0 }
+  ];
+  const selected = sourceCandidates.find((item) => item.hasRows) ?? {
+    source: "No matching source rows",
+    value: 0,
+    hasRows: false
+  };
   const activityVolume =
-    sumRecordMetrics(contentRecords, ACTIVITY_VOLUME_FIELDS) || contentRecords.length || (selected.value > 0 ? 1 : 0);
+    sumRecordMetrics(contentRecords, ACTIVITY_VOLUME_FIELDS) ||
+    contentRecords.length ||
+    (selected.hasRows ? 1 : 0);
 
   return {
     activityVolume,
     metricValue: roundOne(selected.value),
     source: selected.source,
-    series: buildChannelSeries(definition, contentRecords, kpiRecords, spotify)
+    hasData: selected.hasRows,
+    series: buildChannelSeries(definition, contentMetricRecords, kpiRecords, spotifyRecords)
   };
+}
+
+function contentRecordHasChannelMetric(fields: Fields, definition: ChannelDefinition): boolean {
+  if (definition.metricFields.some((fieldName) => fieldValue(fields, fieldName) !== undefined)) {
+    return true;
+  }
+
+  const metricLabel = searchableFieldText(fields, ["Metric Type", "Metric", "KPI", "Metric Name"]);
+  const hasGenericValue = ["Metric Value", "Value"].some((fieldName) => fieldValue(fields, fieldName) !== undefined);
+  return hasGenericValue && termsMatch(metricLabel, definition.metricTerms);
+}
+
+function sumContentChannelMetrics(
+  records: Array<NormalizedAirtableRecord<Fields>>,
+  definition: ChannelDefinition
+): number {
+  return roundOne(records.reduce((sum, record) => {
+    return sum + metricFromFields(record.fields, ["Metric Value", "Value", ...definition.metricFields]);
+  }, 0));
 }
 
 function buildChannelSeries(
@@ -790,7 +835,11 @@ function buildChannelSeries(
   }
 
   for (const record of kpiRecords) {
-    addSeriesPoint(points, dateField(record.fields, KPI_HISTORY_DATE_FIELDS), numberField(record.fields, ["Value", "Metric Value", "Current Value", "Amount"]));
+    addSeriesPoint(
+      points,
+      dateField(record.fields, KPI_HISTORY_DATE_FIELDS),
+      sumKpiChannelMetrics([record], definition)
+    );
   }
 
   if (definition.includeSpotifySnapshot) {
@@ -819,8 +868,10 @@ function recordMatchesChannel(fields: Fields, definition: ChannelDefinition): bo
 }
 
 function kpiRecordMatchesChannel(fields: Fields, definition: ChannelDefinition): boolean {
-  const text = searchableFieldText(fields, ["KPI", "KPI Name", "Metric", "Name"]);
-  return termsMatch(text, definition.aliases) && termsMatch(text, definition.metricTerms);
+  const channelText = searchableFieldText(fields, ["Channel", "Platform", "Source Name", "Source"]);
+  const metricText = searchableFieldText(fields, ["KPI", "KPI Name", "Metric", "Metric Name", "Metric Key", "Name"]);
+  const channelMatches = termsMatch(channelText, definition.aliases) || termsMatch(metricText, definition.aliases);
+  return channelMatches && termsMatch(metricText, definition.metricTerms);
 }
 
 function termsMatch(text: string, terms: string[]): boolean {
@@ -841,9 +892,18 @@ function sumRecordMetrics(records: Array<NormalizedAirtableRecord<Fields>>, fiel
 
 function sumKpiChannelMetrics(records: Array<NormalizedAirtableRecord<Fields>>, definition: ChannelDefinition): number {
   return roundOne(records.reduce((sum, record) => {
-    const label = searchableFieldText(record.fields, ["KPI", "KPI Name", "Metric", "Name"]);
+    const label = searchableFieldText(record.fields, ["KPI", "KPI Name", "Metric", "Metric Name", "Name"]);
     if (!termsMatch(label, definition.metricTerms)) {
       return sum;
+    }
+
+    const unit = searchableFieldText(record.fields, ["Unit"]);
+    const isRate = label.includes("rate") || unit.includes("percent") || unit.includes("percentage");
+    if (definition.metricTerms.some((term) => term.startsWith("click")) && isRate) {
+      const numerator = metricFromFields(record.fields, ["Numerator"]);
+      if (fieldValue(record.fields, "Numerator") !== undefined) {
+        return sum + numerator;
+      }
     }
 
     return sum + numberField(record.fields, ["Value", "Metric Value", "Current Value", "Amount"]);
