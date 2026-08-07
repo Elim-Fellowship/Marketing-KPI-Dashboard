@@ -27,16 +27,16 @@ export class CommunicationsAnalyticsService {
   ) {}
 
   async getHomepage(): Promise<Record<string, unknown>> {
-    const [kpiHistory, contentPerformance, sourceStatus, spotify, bufferPosts] = await    	Promise.all([
-  this.airtable.getRecords("kpiHistory"),
-  this.airtable.getRecords("contentPerformance"),
-  this.airtable.getRecords("dataSourceStatus"),
-  this.airtable.getRecords("spotifyEpisodeMetrics"),
-  this.airtable.getRecords("bufferPostMetrics")
-]);
+    const [kpiHistory, contentPerformance, sourceStatus, spotify, bufferPosts] = await Promise.all([
+      this.airtable.getRecords("kpiHistory"),
+      this.airtable.getRecords("contentPerformance"),
+      this.airtable.getRecords("dataSourceStatus"),
+      this.airtable.getRecords("spotifyEpisodeMetrics"),
+      this.airtable.getRecords("bufferPostMetrics")
+    ]);
 
-console.log("BUFFER POSTS LOADED:", bufferPosts.length);
-console.log("BUFFER SAMPLE:", bufferPosts.slice(0, 2));
+    console.log("BUFFER POSTS LOADED:", bufferPosts.length);
+    console.log("BUFFER SAMPLE:", bufferPosts.slice(0, 2));
 
     const kpiModel = buildKpiModel(kpiHistory);
     const contentModel = buildTopContentModel(contentPerformance, {
@@ -66,7 +66,7 @@ console.log("BUFFER SAMPLE:", bufferPosts.slice(0, 2));
           id: record.id,
           title: stringField(
             record.fields,
-["Source Name", "Name", "Data Source"],
+            ["Source Name", "Name", "Data Source"],
             "Unknown source"
           ),
           status: stringField(
@@ -129,9 +129,9 @@ console.log("BUFFER SAMPLE:", bufferPosts.slice(0, 2));
     );
     const kpiModel = buildKpiModel(filteredKpiHistory);
     const contentModel = buildTopContentModel(filteredContentPerformance, {
-  timeframe: "all",
-  platform: "all"
-});
+      timeframe: "all",
+      platform: "all"
+    });
 
     const overviewTrendSeries = buildOverviewTrendSeries(kpiModel.timeSeriesPerformanceData, filteredSpotify);
     const sourceStatus = status.map((record) => ({
@@ -197,11 +197,51 @@ console.log("BUFFER SAMPLE:", bufferPosts.slice(0, 2));
     platform?: string;
     groupBy?: string;
   }): Promise<Record<string, unknown>> {
-    const records = await this.airtable.getRecords("contentPerformance", {
-      maxRecords: 500
-    });
+    const [contentPerformance, spotifyEpisodes, bufferPosts] = await Promise.all([
+      this.airtable.getRecords("contentPerformance", { maxRecords: 500 }),
+      this.airtable.getRecords("spotifyEpisodeMetrics", { maxRecords: 500 }),
+      this.airtable.getRecords("bufferPostMetrics", { maxRecords: 1000 })
+    ]);
 
-    return buildTopContentModel(records, query);
+    const trustedContentPerformance = contentPerformance
+      .filter(isTraceableContentPerformanceRecord)
+      .map((record) => normalizeContentPerformanceRecord(record));
+    const liveSpotify = spotifyEpisodes
+      .map((record) => normalizeSpotifyTopContentRecord(record))
+      .filter(isDefined);
+    const liveBuffer = bufferPosts
+      .map((record) => normalizeBufferTopContentRecord(record))
+      .filter(isDefined);
+    const liveRecords = deduplicateTopContentRecords([
+      ...trustedContentPerformance,
+      ...liveSpotify,
+      ...liveBuffer
+    ]);
+    const model = buildTopContentModel(liveRecords, query);
+    const activeSources = Array.from(new Set(
+      liveRecords
+        .map((record) => stringField(record.fields, ["Source Name", "Source"], "").trim())
+        .filter(Boolean)
+    )).sort();
+    const expectedSources = ["Spotify", "Buffer", "Mailchimp", "YouTube", "Website", "Castos"];
+    const unavailableSources = expectedSources.filter(
+      (source) => !activeSources.some((active) => active.toLowerCase() === source.toLowerCase())
+    );
+
+    return {
+      ...model,
+      dataState: model.totalRankedItems === 0 ? "empty" : unavailableSources.length === 0 ? "complete" : "partial",
+      dataMessage: model.totalRankedItems === 0
+        ? "No traceable live content analytics match the selected filters."
+        : "Rankings include only traceable live analytics. Unconnected content sources are intentionally omitted.",
+      liveDataSummary: {
+        totalRecords: liveRecords.length,
+        matchingRecords: model.totalRankedItems,
+        sources: activeSources,
+        excludedLegacyContentPerformanceRows: contentPerformance.length - trustedContentPerformance.length,
+        unavailableSources
+      }
+    };
   }
 
   async getComparative(query: { period?: string }): Promise<Record<string, unknown>> {
@@ -426,17 +466,17 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
     metricTerms: ["clicks", "click"],
     color: "#087e8b"
   },
-{
-  key: "spotify",
-  label: "Spotify",
-  metricLabel: "Streams",
-  aliases: ["spotify"],
-  metricFields: ["Streams", "Total Streams"],
-  metricTerms: ["streams", "stream"],
-  color: "#1DB954",
-  includeSpotifySnapshot: true
-},
- {
+  {
+    key: "spotify",
+    label: "Spotify",
+    metricLabel: "Streams",
+    aliases: ["spotify"],
+    metricFields: ["Streams", "Total Streams"],
+    metricTerms: ["streams", "stream"],
+    color: "#1DB954",
+    includeSpotifySnapshot: true
+  },
+  {
     key: "castos",
     label: "Castos",
     metricLabel: "Downloads",
@@ -606,56 +646,56 @@ function buildChannelPerformanceFromRows(
   currentRows: Array<NormalizedAirtableRecord<Fields>>,
   previousRows: Array<NormalizedAirtableRecord<Fields>>
 ): ChannelPerformanceView {
-const current =
-  definition.key === "spotify"
-    ? currentRows.filter((record) =>
-        searchableFieldText(record.fields, [
-          "Source",
-          "Platform",
-          "Episode Name",
-          "Name"
-        ]).toLowerCase().includes("spotify")
-      )
-    : currentRows.filter((record) =>
-        channelPerformanceRecordMatches(record.fields, definition)
-      );
+  const current =
+    definition.key === "spotify"
+      ? currentRows.filter((record) =>
+          searchableFieldText(record.fields, [
+            "Source",
+            "Platform",
+            "Episode Name",
+            "Name"
+          ]).toLowerCase().includes("spotify")
+        )
+      : currentRows.filter((record) =>
+          channelPerformanceRecordMatches(record.fields, definition)
+        );
 
-const previous =
-  definition.key === "spotify"
-    ? previousRows.filter((record) =>
-        searchableFieldText(record.fields, [
-          "Source",
-          "Platform",
-          "Episode Name",
-          "Name"
-        ]).toLowerCase().includes("spotify")
-      )
-    : previousRows.filter((record) =>
-        channelPerformanceRecordMatches(record.fields, definition)
-      );
-const activityVolume =
-  definition.key === "spotify"
-    ? current.length
-    : sumRecordMetrics(current, [
-        "Activity Volume",
-        "Total Activity Volume",
-        "Total Activity",
-        "Volume",
-        "Content Volume"
-      ]);
-const metricFields =
-  definition.key === "spotify"
-    ? [
-        "Total Streams",
-        "Streams",
-        "Metric Value",
-        "Value"
-      ]
-    : [
-        "Metric Value",
-        "Value",
-        ...definition.metricFields
-      ];
+  const previous =
+    definition.key === "spotify"
+      ? previousRows.filter((record) =>
+          searchableFieldText(record.fields, [
+            "Source",
+            "Platform",
+            "Episode Name",
+            "Name"
+          ]).toLowerCase().includes("spotify")
+        )
+      : previousRows.filter((record) =>
+          channelPerformanceRecordMatches(record.fields, definition)
+        );
+  const activityVolume =
+    definition.key === "spotify"
+      ? current.length
+      : sumRecordMetrics(current, [
+          "Activity Volume",
+          "Total Activity Volume",
+          "Total Activity",
+          "Volume",
+          "Content Volume"
+        ]);
+  const metricFields =
+    definition.key === "spotify"
+      ? [
+          "Total Streams",
+          "Streams",
+          "Metric Value",
+          "Value"
+        ]
+      : [
+          "Metric Value",
+          "Value",
+          ...definition.metricFields
+        ];
   const previousMetricFields = [
     "Previous Metric Value",
     "Previous Value",
@@ -682,9 +722,9 @@ const metricFields =
     metricValue,
     previousMetricValue,
     changePercent: explicitChange ?? (hasData ? calculatePercentChange(metricValue, previousMetricValue) : undefined),
-source: definition.key === "spotify"
-  ? "Spotify_Episode_Metrics"
-  : "Channel_Performance",
+    source: definition.key === "spotify"
+      ? "Spotify_Episode_Metrics"
+      : "Channel_Performance",
     hasData,
     series: buildChannelPerformanceSeries(definition, currentRows)
   };
@@ -804,22 +844,14 @@ function measureChannel(
 }
 
 function contentRecordHasChannelMetric(fields: Fields, definition: ChannelDefinition): boolean {
-  if (definition.metricFields.some((fieldName) => fieldValue(fields, fieldName) !== undefined)) {
-    return true;
-  }
-
+  if (definition.metricFields.some((fieldName) => fieldValue(fields, fieldName) !== undefined)) return true;
   const metricLabel = searchableFieldText(fields, ["Metric Type", "Metric", "KPI", "Metric Name"]);
   const hasGenericValue = ["Metric Value", "Value"].some((fieldName) => fieldValue(fields, fieldName) !== undefined);
   return hasGenericValue && termsMatch(metricLabel, definition.metricTerms);
 }
 
-function sumContentChannelMetrics(
-  records: Array<NormalizedAirtableRecord<Fields>>,
-  definition: ChannelDefinition
-): number {
-  return roundOne(records.reduce((sum, record) => {
-    return sum + metricFromFields(record.fields, ["Metric Value", "Value", ...definition.metricFields]);
-  }, 0));
+function sumContentChannelMetrics(records: Array<NormalizedAirtableRecord<Fields>>, definition: ChannelDefinition): number {
+  return roundOne(records.reduce((sum, record) => sum + metricFromFields(record.fields, ["Metric Value", "Value", ...definition.metricFields]), 0));
 }
 
 function buildChannelSeries(
@@ -829,36 +861,16 @@ function buildChannelSeries(
   spotify: Array<NormalizedAirtableRecord<Fields>>
 ): Array<{ date: string; value: number }> {
   const points = new Map<string, number>();
-
-  for (const record of contentRecords) {
-    addSeriesPoint(points, dateField(record.fields, CONTENT_PERFORMANCE_DATE_FIELDS), metricFromFields(record.fields, definition.metricFields));
-  }
-
-  for (const record of kpiRecords) {
-    addSeriesPoint(
-      points,
-      dateField(record.fields, KPI_HISTORY_DATE_FIELDS),
-      sumKpiChannelMetrics([record], definition)
-    );
-  }
-
+  for (const record of contentRecords) addSeriesPoint(points, dateField(record.fields, CONTENT_PERFORMANCE_DATE_FIELDS), metricFromFields(record.fields, definition.metricFields));
+  for (const record of kpiRecords) addSeriesPoint(points, dateField(record.fields, KPI_HISTORY_DATE_FIELDS), sumKpiChannelMetrics([record], definition));
   if (definition.includeSpotifySnapshot) {
-    for (const record of spotify) {
-      addSeriesPoint(points, dateField(record.fields, SPOTIFY_DATE_FIELDS), metricFromFields(record.fields, ["Total Streams", "Streams", "Plays", "Value"]));
-    }
+    for (const record of spotify) addSeriesPoint(points, dateField(record.fields, SPOTIFY_DATE_FIELDS), metricFromFields(record.fields, ["Total Streams", "Streams", "Plays", "Value"]));
   }
-
-  return [...points.entries()]
-    .map(([date, value]) => ({ date, value: roundOne(value) }))
-    .filter((point) => point.date)
-    .sort((left, right) => left.date.localeCompare(right.date));
+  return [...points.entries()].map(([date, value]) => ({ date, value: roundOne(value) })).filter((point) => point.date).sort((a,b) => a.date.localeCompare(b.date));
 }
 
 function addSeriesPoint(points: Map<string, number>, date: string, value: number): void {
-  if (!date || !Number.isFinite(value) || value === 0) {
-    return;
-  }
-
+  if (!date || !Number.isFinite(value) || value === 0) return;
   points.set(date, (points.get(date) ?? 0) + value);
 }
 
@@ -874,38 +886,18 @@ function kpiRecordMatchesChannel(fields: Fields, definition: ChannelDefinition):
   return channelMatches && termsMatch(metricText, definition.metricTerms);
 }
 
-function termsMatch(text: string, terms: string[]): boolean {
-  return terms.some((term) => text.includes(term.toLowerCase()));
-}
-
-function searchableFieldText(fields: Fields, names: string[]): string {
-  return names
-    .map((name) => stringField(fields, [name], ""))
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function sumRecordMetrics(records: Array<NormalizedAirtableRecord<Fields>>, fieldNames: string[]): number {
-  return roundOne(records.reduce((sum, record) => sum + metricFromFields(record.fields, fieldNames), 0));
-}
-
+function termsMatch(text: string, terms: string[]): boolean { return terms.some((term) => text.includes(term.toLowerCase())); }
+function searchableFieldText(fields: Fields, names: string[]): string { return names.map((name) => stringField(fields, [name], "")).filter(Boolean).join(" ").toLowerCase(); }
+function sumRecordMetrics(records: Array<NormalizedAirtableRecord<Fields>>, fieldNames: string[]): number { return roundOne(records.reduce((sum, record) => sum + metricFromFields(record.fields, fieldNames), 0)); }
 function sumKpiChannelMetrics(records: Array<NormalizedAirtableRecord<Fields>>, definition: ChannelDefinition): number {
   return roundOne(records.reduce((sum, record) => {
     const label = searchableFieldText(record.fields, ["KPI", "KPI Name", "Metric", "Metric Name", "Name"]);
-    if (!termsMatch(label, definition.metricTerms)) {
-      return sum;
-    }
-
+    if (!termsMatch(label, definition.metricTerms)) return sum;
     const unit = searchableFieldText(record.fields, ["Unit"]);
     const isRate = label.includes("rate") || unit.includes("percent") || unit.includes("percentage");
-    if (definition.metricTerms.some((term) => term.startsWith("click")) && isRate) {
-      const numerator = metricFromFields(record.fields, ["Numerator"]);
-      if (fieldValue(record.fields, "Numerator") !== undefined) {
-        return sum + numerator;
-      }
+    if (definition.metricTerms.some((term) => term.startsWith("click")) && isRate && fieldValue(record.fields, "Numerator") !== undefined) {
+      return sum + metricFromFields(record.fields, ["Numerator"]);
     }
-
     return sum + numberField(record.fields, ["Value", "Metric Value", "Current Value", "Amount"]);
   }, 0));
 }
@@ -1298,4 +1290,109 @@ function latestRecordByDate(
   return [...records].sort((left, right) =>
     dateField(right.fields, dateNames).localeCompare(dateField(left.fields, dateNames))
   )[0];
+}
+
+function normalizeSpotifyTopContentRecord(
+  record: NormalizedAirtableRecord<Fields>
+): NormalizedAirtableRecord<Fields> | undefined {
+  const title = stringField(record.fields, ["Episode Name"], "").trim();
+  const date = dateField(record.fields, ["Publish Date"]);
+  const streams = numberField(record.fields, ["Total Streams"]);
+  if (!title || !date || !Number.isFinite(streams) || streams < 0) return undefined;
+
+  return {
+    id: `spotify:${record.id}`,
+    createdTime: record.createdTime,
+    fields: {
+      Title: title,
+      Platform: "Spotify",
+      "Content Type": "Podcast Episode",
+      "Publish Date": date,
+      "Metric Label": "Total Streams",
+      "Metric Value": streams,
+      "Metric Unit": "streams",
+      "Source Name": "Spotify",
+      "Source Table": "Spotify_Episode_Metrics",
+      "Source Record ID": record.id
+    }
+  };
+}
+
+function normalizeBufferTopContentRecord(
+  record: NormalizedAirtableRecord<Fields>
+): NormalizedAirtableRecord<Fields> | undefined {
+  const sourceRecordId = stringField(record.fields, ["Source Record ID"], "").trim();
+  const title = stringField(record.fields, ["Content Title"], "").trim();
+  const date = dateField(record.fields, ["Metric Date"]);
+  const metricLabel = stringField(record.fields, ["Metric Name", "Metric Type"], "").trim();
+  const metricValue = numberField(record.fields, ["Metric Value"]);
+  const channel = stringField(record.fields, ["Channel"], "Buffer").trim();
+  if (!sourceRecordId || !title || !date || !metricLabel || !Number.isFinite(metricValue) || metricValue < 0) {
+    return undefined;
+  }
+
+  return {
+    id: `buffer:${record.id}`,
+    createdTime: record.createdTime,
+    fields: {
+      Title: title,
+      Platform: channel || "Buffer",
+      "Content Type": "Social Post",
+      "Publish Date": date,
+      "Metric Label": metricLabel,
+      "Metric Value": metricValue,
+      "Metric Unit": stringField(record.fields, ["Unit"], "count"),
+      "Source Name": "Buffer",
+      "Source Table": "Buffer_Post_Metrics",
+      "Source Record ID": sourceRecordId,
+      Campaign: stringField(record.fields, ["Campaign"], "")
+    }
+  };
+}
+
+function isTraceableContentPerformanceRecord(record: NormalizedAirtableRecord<Fields>): boolean {
+  const title = stringField(record.fields, ["Title", "Content Title", "Name"], "").trim();
+  const date = dateField(record.fields, ["Published At", "Publish Date", "Date"]);
+  const source = stringField(record.fields, ["Source Name", "Source"], "").trim();
+  const sourceRecordId = stringField(record.fields, ["Source Record ID", "Unique Key"], "").trim();
+  const metricLabel = stringField(record.fields, ["Metric Label", "Metric", "KPI", "Metric Type"], "").trim();
+  const metricValue = numberField(record.fields, ["Metric Value", "Value", "Score", "Content Score"]);
+  return Boolean(title && date && source && sourceRecordId && metricLabel && Number.isFinite(metricValue) && metricValue >= 0);
+}
+
+function normalizeContentPerformanceRecord(
+  record: NormalizedAirtableRecord<Fields>
+): NormalizedAirtableRecord<Fields> {
+  return {
+    ...record,
+    fields: {
+      ...record.fields,
+      "Metric Label": stringField(record.fields, ["Metric Label", "Metric", "KPI", "Metric Type"], "Content Score"),
+      "Metric Value": numberField(record.fields, ["Metric Value", "Value", "Score", "Content Score"]),
+      "Metric Unit": stringField(record.fields, ["Metric Unit", "Unit"], ""),
+      "Source Name": stringField(record.fields, ["Source Name", "Source"], ""),
+      "Source Table": stringField(record.fields, ["Source Table"], "Content_Performance"),
+      "Source Record ID": stringField(record.fields, ["Source Record ID", "Unique Key"], "")
+    }
+  };
+}
+
+function deduplicateTopContentRecords(
+  records: Array<NormalizedAirtableRecord<Fields>>
+): Array<NormalizedAirtableRecord<Fields>> {
+  const seen = new Set<string>();
+  return records.filter((record) => {
+    const key = [
+      stringField(record.fields, ["Source Name"], ""),
+      stringField(record.fields, ["Source Record ID"], record.id),
+      stringField(record.fields, ["Metric Label"], "")
+    ].join(":").toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function isDefined<T>(value: T | undefined): value is T {
+  return value !== undefined;
 }
