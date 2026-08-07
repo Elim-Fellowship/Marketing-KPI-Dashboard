@@ -129,6 +129,8 @@ interface SyncOptions {
   periodType?: string;
 }
 
+const MAILCHIMP_REPORT_CONCURRENCY = 5;
+
 const KPI_HISTORY_REQUIRED_FIELDS = [
   "Unique Key",
   "Metric",
@@ -201,7 +203,11 @@ export class MailchimpService {
 
       for (const period of periods) {
         const campaigns = await this.fetchCampaigns(period);
-        const reports = await Promise.all(campaigns.map((campaign) => this.fetchCampaignReport(campaign.id)));
+        const reports = await mapWithConcurrency(
+          campaigns,
+          MAILCHIMP_REPORT_CONCURRENCY,
+          (campaign) => this.fetchCampaignReport(campaign.id)
+        );
         periodMetrics.push(this.buildPeriodMetrics(period, campaigns, reports, activity, listInfo));
       }
 
@@ -465,6 +471,36 @@ export class MailchimpService {
 
     return result;
   }
+}
+
+async function mapWithConcurrency<T, TResult>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<TResult>
+): Promise<TResult[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const results = new Array<TResult>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= items.length) {
+        return;
+      }
+
+      results[index] = await mapper(items[index]);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
 }
 
 function toKpiHistoryRows(metrics: MailchimpPeriodMetrics): AirtableFields[] {
