@@ -220,14 +220,20 @@ export abstract class BaseConnector implements CommunicationsConnector {
 }
 
 function toBufferAirtableRecord(metric: NormalizedConnectorMetric): ConnectorAirtableRecord {
+  const originalSourceRecordId = metric.sourceRecordId ?? metric.uniqueKey;
+  const bufferMetricKey = [originalSourceRecordId, metric.metricName, metric.date]
+    .join(":")
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+
   return {
     tableKey: metric.targetTableKey,
     uniqueKey: {
       fieldName: "Source Record ID",
-      value: metric.sourceRecordId ?? metric.uniqueKey
+      value: bufferMetricKey
     },
     fields: removeUndefined({
-      "Source Record ID": metric.sourceRecordId ?? metric.uniqueKey,
+      "Source Record ID": bufferMetricKey,
       "Metric Name": metric.metricName,
       "Metric Value": metric.value,
       Unit: metric.unit,
@@ -237,6 +243,10 @@ function toBufferAirtableRecord(metric: NormalizedConnectorMetric): ConnectorAir
       "Content Title": metric.contentTitle,
       "Content Type": metric.contentType,
       "Activity Volume": metric.activityVolume,
+      Dimensions: JSON.stringify({
+        sourceRecordId: originalSourceRecordId,
+        ...(metric.dimensions ?? {})
+      }),
       "Metric Type": metric.dimensions?.metricType,
       "Channel ID": metric.dimensions?.channelId
     })
