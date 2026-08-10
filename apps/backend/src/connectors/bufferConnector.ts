@@ -13,6 +13,7 @@ interface BufferChannel {
 
 interface BufferOrganization {
   id: string;
+  name: string;
 }
 
 export class BufferConnector extends BaseConnector {
@@ -56,6 +57,7 @@ export class BufferConnector extends BaseConnector {
           account {
             organizations {
               id
+              name
             }
           }
         }
@@ -70,10 +72,13 @@ export class BufferConnector extends BaseConnector {
       );
 
       if (!organizationAccessible) {
+        const accessibleOrganization = organizations.length === 1 ? organizations[0] : undefined;
         return {
           ok: false,
           status: "Error",
-          message: `Configured BUFFER_ORGANIZATION_ID is not accessible to this Buffer API key (${organizations.length} organization(s) accessible).`
+          message: accessibleOrganization
+            ? `Configured BUFFER_ORGANIZATION_ID is not accessible to this Buffer API key. Accessible organization: ${accessibleOrganization.name} (${accessibleOrganization.id}).`
+            : `Configured BUFFER_ORGANIZATION_ID is not accessible to this Buffer API key (${organizations.length} organization(s) accessible).`
         };
       }
 
