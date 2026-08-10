@@ -11,6 +11,10 @@ interface BufferChannel {
   service: string;
 }
 
+interface BufferOrganization {
+  id: string;
+}
+
 export class BufferConnector extends BaseConnector {
   readonly metadata = {
     id: "buffer" as const,
@@ -33,11 +37,58 @@ export class BufferConnector extends BaseConnector {
       };
     }
 
-    return {
-      ok: true,
-      status: "Connected",
-      message: "Buffer API authentication configured."
-    };
+    if (!context.config.buffer.organizationId) {
+      return {
+        ok: false,
+        status: "Needs Setup",
+        message: "Missing BUFFER_ORGANIZATION_ID"
+      };
+    }
+
+    try {
+      const data = await this.request<{
+        account: {
+          organizations: BufferOrganization[];
+        };
+      }>(
+        `
+        query GetOrganizations {
+          account {
+            organizations {
+              id
+            }
+          }
+        }
+        `,
+        {},
+        context
+      );
+
+      const organizations = data.account?.organizations ?? [];
+      const organizationAccessible = organizations.some(
+        (organization) => organization.id === context.config.buffer.organizationId
+      );
+
+      if (!organizationAccessible) {
+        return {
+          ok: false,
+          status: "Error",
+          message: `Configured BUFFER_ORGANIZATION_ID is not accessible to this Buffer API key (${organizations.length} organization(s) accessible).`
+        };
+      }
+
+      return {
+        ok: true,
+        status: "Connected",
+        message: "Buffer API key authenticated and configured organization is accessible."
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: "Error",
+        message: `Buffer authentication/organization check failed: ${error instanceof Error ? error.message : String(error)}`
+      };
+    }
   }
 
 
