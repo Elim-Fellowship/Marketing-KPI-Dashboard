@@ -41,7 +41,24 @@ export class AirtableService {
 
     const tableName = this.resolveTableName(tableKey);
     const records = await this.airtable.findRecords<AirtableTableRecordMap[TKey]>(tableName, options);
-    const normalized = records.map(normalizeRecord);
+    let normalized = records.map(normalizeRecord);
+
+    if (tableKey === "channelPerformance") {
+      const bufferTableName = this.resolveTableName("bufferPostMetrics");
+      const bufferRecords = await this.airtable.findRecords<Record<string, unknown>>(bufferTableName, {
+        maxRecords: 1000
+      });
+      const bufferChannelRows = bufferRecords
+        .map(normalizeRecord)
+        .filter(isBufferLikeMetric)
+        .map(toChannelPerformanceRecord);
+
+      normalized = [
+        ...normalized,
+        ...bufferChannelRows
+      ] as Array<NormalizedAirtableRecord<AirtableTableRecordMap[TKey]>>;
+    }
+
     this.setCached(cacheKey, normalized);
     return normalized;
   }
@@ -54,8 +71,8 @@ export class AirtableService {
       "dashboardViews",
       "alerts",
       "spotifyWeeklySnapshot",
-"spotifyEpisodeMetrics",     
-"contentPerformance",
+      "spotifyEpisodeMetrics",
+      "contentPerformance",
       "kpiHistory",
       "channelPerformance",
       "monthlyActivitySummary"
@@ -73,14 +90,14 @@ export class AirtableService {
 
   async getCommunicationsTables(): Promise<Record<CommunicationsTableKey, Array<NormalizedAirtableRecord<Record<string, unknown>>>>> {
     const keys: CommunicationsTableKey[] = [
-  "spotifyWeeklySnapshot",
-  "bufferPostMetrics",
-  "contentPerformance",
-  "kpiHistory",
-  "dataSourceStatus",
-  "channelPerformance",
-  "monthlyActivitySummary"
-];
+      "spotifyWeeklySnapshot",
+      "bufferPostMetrics",
+      "contentPerformance",
+      "kpiHistory",
+      "dataSourceStatus",
+      "channelPerformance",
+      "monthlyActivitySummary"
+    ];
 
     const entries = await Promise.all(
       keys.map(async (key) => [key, await this.getRecords(key)] as const)
@@ -96,17 +113,16 @@ export class AirtableService {
     this.cache.clear();
   }
 
-private resolveTableName(tableKey: AirtableTableKey): string {
-  const tableMap = this.config.airtable.tables;
+  private resolveTableName(tableKey: AirtableTableKey): string {
+    const tableMap = this.config.airtable.tables;
+    const tableName = tableMap[tableKey];
 
-  const tableName = tableMap[tableKey];
+    if (!tableName) {
+      throw new Error(`Missing Airtable table mapping for: ${tableKey}`);
+    }
 
-  if (!tableName) {
-    throw new Error(`Missing Airtable table mapping for: ${tableKey}`);
+    return tableName;
   }
-
-  return tableName;
-} 
 
   private getCached<T>(key: string): T | undefined {
     const entry = this.cache.get(key);
@@ -133,5 +149,43 @@ function normalizeRecord<TFields extends Record<string, unknown>>(
     id: record.id,
     createdTime: record.createdTime,
     fields: record.fields
+  };
+}
+
+function isBufferLikeMetric(
+  record: NormalizedAirtableRecord<Record<string, unknown>>
+): boolean {
+  const metricName = String(record.fields["Metric Name"] ?? "").trim().toLowerCase();
+  const channel = String(record.fields.Channel ?? "").trim().toLowerCase();
+
+  return (
+    (channel === "instagram" || channel === "facebook") &&
+    (metricName === "like" || metricName === "likes" || metricName.includes("like"))
+  );
+}
+
+function toChannelPerformanceRecord(
+  record: NormalizedAirtableRecord<Record<string, unknown>>
+): NormalizedAirtableRecord<Record<string, unknown>> {
+  const fields = record.fields;
+  const channel = String(fields.Channel ?? "").trim();
+  const metricName = String(fields["Metric Name"] ?? "Likes").trim() || "Likes";
+
+  return {
+    id: `buffer:${record.id}`,
+    createdTime: record.createdTime,
+    fields: {
+      Source: "Buffer",
+      Platform: channel || fields.Platform || "Buffer",
+      Channel: channel,
+      Name: fields["Content Title"] ?? metricName,
+      "Content Title": fields["Content Title"],
+      Metric: metricName,
+      "Metric Label": "Likes",
+      "Metric Value": fields["Metric Value"],
+      Date: fields["Metric Date"],
+      "Activity Volume": fields["Activity Volume"] ?? 1,
+      "Source Record ID": fields["Source Record ID"]
+    }
   };
 }
