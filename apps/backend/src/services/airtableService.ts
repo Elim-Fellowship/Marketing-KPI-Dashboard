@@ -50,7 +50,7 @@ export class AirtableService {
       });
       const bufferChannelRows = bufferRecords
         .map(normalizeRecord)
-        .filter(isBufferLikeMetric)
+        .filter(isBufferSocialReactionMetric)
         .map(toChannelPerformanceRecord);
 
       normalized = [
@@ -152,16 +152,16 @@ function normalizeRecord<TFields extends Record<string, unknown>>(
   };
 }
 
-function isBufferLikeMetric(
+function isBufferSocialReactionMetric(
   record: NormalizedAirtableRecord<Record<string, unknown>>
 ): boolean {
   const metricName = String(record.fields["Metric Name"] ?? "").trim().toLowerCase();
   const channel = String(record.fields.Channel ?? "").trim().toLowerCase();
+  const isSocialChannel = channel === "instagram" || channel === "facebook";
+  const isReactionMetric = metricName === "reaction" || metricName === "reactions";
+  const isLegacyLikeMetric = metricName === "like" || metricName === "likes";
 
-  return (
-    (channel === "instagram" || channel === "facebook") &&
-    (metricName === "like" || metricName === "likes" || metricName.includes("like"))
-  );
+  return isSocialChannel && (isReactionMetric || isLegacyLikeMetric);
 }
 
 function toChannelPerformanceRecord(
@@ -169,7 +169,7 @@ function toChannelPerformanceRecord(
 ): NormalizedAirtableRecord<Record<string, unknown>> {
   const fields = record.fields;
   const channel = String(fields.Channel ?? "").trim();
-  const metricName = String(fields["Metric Name"] ?? "Likes").trim() || "Likes";
+  const metricName = String(fields["Metric Name"] ?? "Reactions").trim() || "Reactions";
 
   return {
     id: `buffer:${record.id}`,
@@ -181,7 +181,7 @@ function toChannelPerformanceRecord(
       Name: fields["Content Title"] ?? metricName,
       "Content Title": fields["Content Title"],
       Metric: metricName,
-      "Metric Label": "Likes",
+      "Metric Label": metricName,
       "Metric Value": fields["Metric Value"],
       Date: fields["Metric Date"],
       "Activity Volume": fields["Activity Volume"] ?? 1,
