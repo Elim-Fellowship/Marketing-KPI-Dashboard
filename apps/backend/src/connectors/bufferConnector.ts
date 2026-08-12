@@ -214,7 +214,7 @@ export class BufferConnector extends BaseConnector {
     let hasNextPage = true;
 
     while (hasNextPage && pageCount < BUFFER_MAX_PAGES) {
-      const page = await this.request<BufferPostsPage>(
+      const page: BufferPostsPage = await this.request<BufferPostsPage>(
         `
         query GetPosts(
           $organizationId: OrganizationId!
@@ -264,7 +264,7 @@ export class BufferConnector extends BaseConnector {
         context
       );
 
-      posts.push(...page.posts.edges.map((edge) => edge.node));
+      posts.push(...page.posts.edges.map((edge: { node: BufferPostNode }) => edge.node));
       pageCount += 1;
       hasNextPage = page.posts.pageInfo.hasNextPage;
       after = page.posts.pageInfo.endCursor;
