@@ -96,7 +96,6 @@ export class BufferConnector extends BaseConnector {
     }
   }
 
-
   async getMockMetrics(
     context: ConnectorRunContext
   ): Promise<RawConnectorMetric[]> {
@@ -117,13 +116,11 @@ export class BufferConnector extends BaseConnector {
     ];
   }
 
-
   private async request<T>(
     query: string,
     variables: Record<string, unknown>,
     context: ConnectorRunContext
   ): Promise<T> {
-
     const response = await fetch(
       "https://api.buffer.com/graphql",
       {
@@ -159,16 +156,13 @@ export class BufferConnector extends BaseConnector {
     return json.data as T;
   }
 
-
   async fetchMetrics(
     context: ConnectorRunContext
   ): Promise<RawConnectorMetric[]> {
-
     context.logger.info("Buffer config debug", {
       hasToken: Boolean(context.config.buffer.accessToken),
       organizationId: context.config.buffer.organizationId
     });
-
 
     const channels = await this.request<{
       channels: BufferChannel[];
@@ -192,11 +186,14 @@ export class BufferConnector extends BaseConnector {
       context
     );
 
-
     context.logger.info("Buffer channels loaded", {
-      count: channels.channels.length
+      count: channels.channels.length,
+      channels: channels.channels.map((channel) => ({
+        name: channel.name,
+        service: channel.service,
+        id: channel.id
+      }))
     });
-
 
     const posts = await this.request<{
       posts: {
@@ -251,27 +248,27 @@ export class BufferConnector extends BaseConnector {
       context
     );
 
+    const postCountsByService = posts.posts.edges.reduce<Record<string, number>>((counts, edge) => {
+      const service = edge.node.channelService || "unknown";
+      counts[service] = (counts[service] ?? 0) + 1;
+      return counts;
+    }, {});
 
     context.logger.info("Buffer posts loaded", {
-      count: posts.posts.edges.length
+      count: posts.posts.edges.length,
+      byService: postCountsByService
     });
-
 
     const metrics: RawConnectorMetric[] = [];
 
-
     for (const edge of posts.posts.edges) {
-
       const post = edge.node;
-
 
       if (!post.metrics) {
         continue;
       }
 
-
       for (const metric of post.metrics) {
-
         metrics.push({
           sourceRecordId: post.id,
           metricName: metric.name,
@@ -289,16 +286,21 @@ export class BufferConnector extends BaseConnector {
             channelId: post.channelId
           }
         });
-
       }
     }
 
+    const metricCountsByService = metrics.reduce<Record<string, number>>((counts, metric) => {
+      const service = metric.channel || "unknown";
+      counts[service] = (counts[service] ?? 0) + 1;
+      return counts;
+    }, {});
 
     context.logger.info("Buffer metrics transformed", {
-      count: metrics.length
+      count: metrics.length,
+      byService: metricCountsByService
     });
 
-   context.logger.info("Buffer final metric sample", {
+    context.logger.info("Buffer final metric sample", {
       sample: metrics.slice(0, 5)
     });
 
