@@ -3,7 +3,7 @@ import type { NormalizedAirtableRecord } from "../types/airtableTables.js";
 import type { AirtableService } from "./airtableService.js";
 import { CommunicationsAnalyticsService } from "./communicationsAnalyticsService.js";
 import { calculatePercentChange } from "./kpiCalculationEngine.js";
-import { dateField, stringField, type Fields } from "./communicationsIntelligenceModel.js";
+import { dateField, numberField, stringField, type Fields } from "./communicationsIntelligenceModel.js";
 
 interface ChannelLike {
   key?: string;
@@ -38,51 +38,25 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
     dateMode?: string;
   } = {}): Promise<Record<string, unknown>> {
     const base = await super.getChannelBreakdown(query) as Record<string, any>;
-    const contentPerformance = await this.liveAirtable.getRecords("contentPerformance", {
-      maxRecords: 1000
-    });
+    const [contentPerformance, kpiHistory] = await Promise.all([
+      this.liveAirtable.getRecords("contentPerformance", { maxRecords: 1000 }),
+      this.liveAirtable.getRecords("kpiHistory", { maxRecords: 1000 })
+    ]);
 
     const dateRange = (base.dateRange ?? {}) as DateRangeLike;
     const previousDateRange = (base.previousDateRange ?? {}) as DateRangeLike;
     const currentCastos = filterCastosEpisodes(contentPerformance, dateRange);
     const previousCastos = filterCastosEpisodes(contentPerformance, previousDateRange);
     const channels = Array.isArray(base.channels) ? [...base.channels] as ChannelLike[] : [];
-    const castosIndex = channels.findIndex((channel) => channel.key === "castos");
-    const priorCastos = castosIndex >= 0 ? channels[castosIndex] : undefined;
 
-    const castosChannel: ChannelLike = {
-      key: "castos",
-      label: priorCastos?.label ?? "Castos",
-      metricLabel: "Downloads / Listens",
-      color: priorCastos?.color ?? "#6d28d9",
-      activityVolume: currentCastos.length,
-      metricValue: 0,
-      previousMetricValue: 0,
-      changePercent: undefined,
-      source: "Content_Performance",
-      hasData: currentCastos.length > 0,
-      metricAvailable: false,
-      metricNote: "Audience analytics are not available from the connected Castos API.",
-      series: []
-    };
-
-    if (castosIndex >= 0) {
-      channels[castosIndex] = castosChannel;
-    } else {
-      channels.push(castosChannel);
-    }
+    replaceCastosChannel(channels, currentCastos, previousCastos);
+    replaceEmailChannel(channels, kpiHistory, dateRange, previousDateRange);
 
     const comparable = channels.filter(
       (channel) => channel.hasData && channel.metricAvailable !== false
     );
-    const currentTotal = comparable.reduce(
-      (sum, channel) => sum + finiteNumber(channel.metricValue),
-      0
-    );
-    const previousTotal = comparable.reduce(
-      (sum, channel) => sum + finiteNumber(channel.previousMetricValue),
-      0
-    );
+    const currentTotal = comparable.reduce((sum, channel) => sum + finiteNumber(channel.metricValue), 0);
+    const previousTotal = comparable.reduce((sum, channel) => sum + finiteNumber(channel.previousMetricValue), 0);
 
     return {
       ...base,
@@ -91,9 +65,7 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
         ...(base.summary ?? {}),
         currentValue: currentTotal,
         previousValue: previousTotal,
-        changePercent: comparable.length
-          ? calculatePercentChange(currentTotal, previousTotal)
-          : undefined,
+        changePercent: comparable.length ? calculatePercentChange(currentTotal, previousTotal) : undefined,
         channelCount: comparable.length
       },
       castosDataState: {
@@ -114,6 +86,90 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
       }
     };
   }
+}
+
+function replaceCastosChannel(
+  channels: ChannelLike[],
+  currentCastos: Array<NormalizedAirtableRecord<Fields>>,
+  previousCastos: Array<NormalizedAirtableRecord<Fields>>
+): void {
+  const index = channels.findIndex((channel) => channel.key === "castos");
+  const prior = index >= 0 ? channels[index] : undefined;
+  const channel: ChannelLike = {
+    key: "castos",
+    label: prior?.label ?? "Castos",
+    metricLabel: "Downloads / Listens",
+    color: prior?.color ?? "#6d28d9",
+    activityVolume: currentCastos.length,
+    metricValue: 0,
+    previousMetricValue: 0,
+    changePercent: undefined,
+    source: "Content_Performance",
+    hasData: currentCastos.length > 0,
+    metricAvailable: false,
+    metricNote: "Audience analytics are not available from the connected Castos API.",
+    series: []
+  };
+  if (index >= 0) channels[index] = channel;
+  else channels.push(channel);
+}
+
+function replaceEmailChannel(
+  channels: ChannelLike[],
+  kpiHistory: Array<NormalizedAirtableRecord<Fields>>,
+  currentRange: DateRangeLike,
+  previousRange: DateRangeLike
+): void {
+  const index = channels.findIndex((channel) => channel.key === "email");
+  if (index < 0) return;
+
+  const currentCampaigns = findMailchimpMetric(kpiHistory, "campaigns_sent", currentRange);
+  const currentClickRate = findMailchimpMetric(kpiHistory, "email_click_rate", currentRange);
+  const previousClickRate = findMailchimpMetric(kpiHistory, "email_click_rate", previousRange);
+
+  if (!currentCampaigns && !currentClickRate) return;
+
+  const prior = channels[index];
+  const currentClicks = currentClickRate ? numberField(currentClickRate.fields, ["Numerator"], 0) : finiteNumber(prior.metricValue);
+  const previousClicks = previousClickRate ? numberField(previousClickRate.fields, ["Numerator"], 0) : finiteNumber(prior.previousMetricValue);
+  const campaignCount = currentCampaigns ? numberField(currentCampaigns.fields, ["Value"], 0) : finiteNumber(prior.activityVolume);
+
+  channels[index] = {
+    ...prior,
+    activityVolume: campaignCount,
+    metricLabel: "Clicks",
+    metricValue: currentClicks,
+    previousMetricValue: previousClicks,
+    changePercent: calculatePercentChange(currentClicks, previousClicks),
+    source: "KPI_History / Mailchimp",
+    hasData: campaignCount > 0 || currentClicks > 0,
+    metricAvailable: true
+  };
+}
+
+function findMailchimpMetric(
+  records: Array<NormalizedAirtableRecord<Fields>>,
+  metricKey: string,
+  range: DateRangeLike
+): NormalizedAirtableRecord<Fields> | undefined {
+  const candidates = records.filter((record) => {
+    const source = [
+      stringField(record.fields, ["Source Name"], ""),
+      stringField(record.fields, ["Platform"], ""),
+      stringField(record.fields, ["Channel"], "")
+    ].join(" ").toLowerCase();
+    if (!source.includes("mailchimp") && !source.includes("email")) return false;
+
+    const key = stringField(record.fields, ["Metric Key"], "").toLowerCase();
+    if (key !== metricKey) return false;
+
+    if (!range.startDate || !range.endDate) return true;
+    const start = stringField(record.fields, ["Period Start", "Date"], "");
+    const end = stringField(record.fields, ["Period End", "Snapshot Date", "Date"], "");
+    return start === range.startDate && end === range.endDate;
+  });
+
+  return candidates.find((record) => stringField(record.fields, ["Period Type"], "").toLowerCase() === "monthly") ?? candidates[0];
 }
 
 function filterCastosEpisodes(
