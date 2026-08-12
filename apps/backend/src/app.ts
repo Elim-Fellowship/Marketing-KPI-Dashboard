@@ -122,7 +122,9 @@ export function createApp(config: AppConfig, logger: Logger): express.Express {
 
   app.get("/api/integrations/mailchimp/sync", requireSyncAuth(config), asyncHandler(async (request, response) => {
     const result = await mailchimpService.sync({
-      periodType: optionalString(request.query.periodType)
+      periodType: optionalString(request.query.periodType),
+      startDate: optionalString(request.query.startDate),
+      endDate: optionalString(request.query.endDate)
     });
 
     response.json({ result });

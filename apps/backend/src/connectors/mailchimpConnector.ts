@@ -1,5 +1,11 @@
 import { BaseConnector } from "./baseConnector.js";
-import type { ConnectorMetadata, ConnectorRunContext, RawConnectorMetric } from "./types.js";
+import type {
+  ConnectorMetadata,
+  ConnectorRunContext,
+  ConnectorSyncResult,
+  RawConnectorMetric
+} from "./types.js";
+import { MailchimpService } from "../services/mailchimpService.js";
 
 export class MailchimpConnector extends BaseConnector {
   readonly metadata: ConnectorMetadata = {
@@ -7,58 +13,61 @@ export class MailchimpConnector extends BaseConnector {
     name: "Mailchimp Connector",
     sourceName: "Mailchimp",
     category: "email",
-    mode: "mock",
+    mode: "api",
     enabled: true,
-    description: "Placeholder connector for newsletter and email campaign analytics."
+    description: "Imports production newsletter and email campaign analytics from Mailchimp."
   };
 
-  protected async getMockMetrics(_context: ConnectorRunContext): Promise<RawConnectorMetric[]> {
-    const date = currentDate();
+  async sync(context: ConnectorRunContext): Promise<ConnectorSyncResult> {
+    const startedAtMs = Date.now();
 
-    return [
-      {
-        sourceRecordId: "monthly-newsletter-clicks",
-        metricName: "Email Clicks",
-        value: 842,
-        unit: "clicks",
-        date,
-        targetTableKey: "contentPerformance",
-        platform: "Email",
-        channel: "Newsletter",
-        contentTitle: "Monthly Newsletter",
-        contentType: "Newsletter Edition",
-        campaign: "Monthly Communications",
-        activityVolume: 1
+    if (context.dryRun) {
+      const finishedAt = new Date().toISOString();
+      return {
+        connectorId: this.metadata.id,
+        sourceName: this.metadata.sourceName,
+        status: "Skipped",
+        startedAt: context.startedAt,
+        finishedAt,
+        durationMs: Date.now() - startedAtMs,
+        metricsFetched: 0,
+        recordsPrepared: 0,
+        writeResult: {
+          attempted: 0,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          dryRun: true
+        },
+        errorMessage: "Mailchimp production sync is write-through and is skipped in dry-run mode."
+      };
+    }
+
+    const service = new MailchimpService(context.config, context.airtable, context.logger);
+    const result = await service.sync({ periodType: "both" });
+    const finishedAt = new Date().toISOString();
+
+    return {
+      connectorId: this.metadata.id,
+      sourceName: this.metadata.sourceName,
+      status: result.success ? "Success" : "Failed",
+      startedAt: context.startedAt,
+      finishedAt,
+      durationMs: Date.now() - startedAtMs,
+      metricsFetched: result.campaignsProcessed,
+      recordsPrepared: result.recordsProcessed,
+      writeResult: {
+        attempted: result.recordsProcessed,
+        created: result.recordsCreated,
+        updated: result.recordsUpdated,
+        skipped: 0,
+        dryRun: false
       },
-      {
-        sourceRecordId: "monthly-newsletter-opens",
-        metricName: "Email Opens",
-        value: 5310,
-        unit: "opens",
-        date,
-        targetTableKey: "contentPerformance",
-        platform: "Email",
-        channel: "Newsletter",
-        contentTitle: "Monthly Newsletter",
-        contentType: "Newsletter Edition",
-        campaign: "Monthly Communications",
-        activityVolume: 1
-      },
-      {
-        sourceRecordId: "subscriber-growth",
-        metricName: "New Subscribers",
-        value: 124,
-        unit: "subscribers",
-        date,
-        targetTableKey: "kpiHistory",
-        platform: "Email",
-        channel: "Newsletter",
-        contentType: "Audience Growth"
-      }
-    ];
+      errorMessage: result.success ? undefined : result.message
+    };
   }
-}
 
-function currentDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  protected async getMockMetrics(_context: ConnectorRunContext): Promise<RawConnectorMetric[]> {
+    return [];
+  }
 }
