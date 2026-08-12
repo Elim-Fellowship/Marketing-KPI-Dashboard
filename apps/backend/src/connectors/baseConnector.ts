@@ -83,7 +83,11 @@ export abstract class BaseConnector implements CommunicationsConnector {
         payload.records.map((record) => record.fields)
       );
 
-      context.logger.info("Buffer Airtable batch upsert completed", result);
+      context.logger.info("Buffer Airtable batch upsert completed", {
+        attempted: result.attempted,
+        created: result.created,
+        updated: result.updated
+      });
 
       return {
         attempted: result.attempted,
