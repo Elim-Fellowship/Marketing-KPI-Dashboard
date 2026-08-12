@@ -218,7 +218,6 @@ export class BufferConnector extends BaseConnector {
         `
         query GetPosts(
           $organizationId: OrganizationId!
-          $startDate: DateTime!
           $first: Int!
           $after: String
         ) {
@@ -229,7 +228,6 @@ export class BufferConnector extends BaseConnector {
               organizationId: $organizationId
               filter: {
                 status: [sent]
-                startDate: $startDate
               }
             }
           ) {
@@ -257,7 +255,6 @@ export class BufferConnector extends BaseConnector {
         `,
         {
           organizationId: context.config.buffer.organizationId,
-          startDate: BUFFER_HISTORY_START_DATE,
           first: BUFFER_POST_PAGE_SIZE,
           after
         },
@@ -285,14 +282,21 @@ export class BufferConnector extends BaseConnector {
       throw new Error(`Buffer pagination exceeded safety limit of ${BUFFER_MAX_PAGES} pages`);
     }
 
-    const postCountsByService = posts.reduce<Record<string, number>>((counts, post) => {
+    const historyStartMs = Date.parse(BUFFER_HISTORY_START_DATE);
+    const eligiblePosts = posts.filter((post) => {
+      const sentAtMs = Date.parse(post.sentAt);
+      return Number.isFinite(sentAtMs) && sentAtMs >= historyStartMs;
+    });
+
+    const postCountsByService = eligiblePosts.reduce<Record<string, number>>((counts, post) => {
       const service = post.channelService || "unknown";
       counts[service] = (counts[service] ?? 0) + 1;
       return counts;
     }, {});
 
     context.logger.info("Buffer posts loaded", {
-      count: posts.length,
+      fetchedCount: posts.length,
+      eligibleCount: eligiblePosts.length,
       pages: pageCount,
       historyStartDate: BUFFER_HISTORY_START_DATE,
       byService: postCountsByService
@@ -300,7 +304,7 @@ export class BufferConnector extends BaseConnector {
 
     const metrics: RawConnectorMetric[] = [];
 
-    for (const post of posts) {
+    for (const post of eligiblePosts) {
       if (!post.metrics) {
         continue;
       }
