@@ -16,6 +16,34 @@ interface BufferOrganization {
   name: string;
 }
 
+interface BufferPostNode {
+  id: string;
+  text: string;
+  sentAt: string;
+  channelId: string;
+  channelService: string;
+  metrics: Array<{
+    type: string;
+    name: string;
+    value: number;
+    unit: string;
+  }> | null;
+}
+
+interface BufferPostsPage {
+  posts: {
+    edges: Array<{ node: BufferPostNode }>;
+    pageInfo: {
+      hasNextPage: boolean;
+      endCursor: string | null;
+    };
+  };
+}
+
+const BUFFER_HISTORY_START_DATE = "2026-07-01T00:00:00.000Z";
+const BUFFER_POST_PAGE_SIZE = 50;
+const BUFFER_MAX_PAGES = 20;
+
 export class BufferConnector extends BaseConnector {
   readonly metadata = {
     id: "buffer" as const,
@@ -121,25 +149,17 @@ export class BufferConnector extends BaseConnector {
     variables: Record<string, unknown>,
     context: ConnectorRunContext
   ): Promise<T> {
-    const response = await fetch(
-      "https://api.buffer.com/graphql",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${context.config.buffer.accessToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          query,
-          variables
-        })
-      }
-    );
+    const response = await fetch("https://api.buffer.com/graphql", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${context.config.buffer.accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ query, variables })
+    });
 
     if (!response.ok) {
-      throw new Error(
-        `Buffer API request failed (${response.status})`
-      );
+      throw new Error(`Buffer API request failed (${response.status})`);
     }
 
     const json = await response.json() as {
@@ -148,9 +168,7 @@ export class BufferConnector extends BaseConnector {
     };
 
     if (json.errors?.length) {
-      throw new Error(
-        `Buffer GraphQL error: ${JSON.stringify(json.errors)}`
-      );
+      throw new Error(`Buffer GraphQL error: ${JSON.stringify(json.errors)}`);
     }
 
     return json.data as T;
@@ -161,7 +179,8 @@ export class BufferConnector extends BaseConnector {
   ): Promise<RawConnectorMetric[]> {
     context.logger.info("Buffer config debug", {
       hasToken: Boolean(context.config.buffer.accessToken),
-      organizationId: context.config.buffer.organizationId
+      organizationId: context.config.buffer.organizationId,
+      historyStartDate: BUFFER_HISTORY_START_DATE
     });
 
     const channels = await this.request<{
@@ -169,20 +188,14 @@ export class BufferConnector extends BaseConnector {
     }>(
       `
       query GetChannels($organizationId: OrganizationId!) {
-        channels(
-          input: {
-            organizationId: $organizationId
-          }
-        ) {
+        channels(input: { organizationId: $organizationId }) {
           id
           name
           service
         }
       }
       `,
-      {
-        organizationId: context.config.buffer.organizationId
-      },
+      { organizationId: context.config.buffer.organizationId },
       context
     );
 
@@ -195,75 +208,99 @@ export class BufferConnector extends BaseConnector {
       }))
     });
 
-    const posts = await this.request<{
-      posts: {
-        edges: Array<{
-          node: {
-            id: string;
-            text: string;
-            sentAt: string;
-            channelId: string;
-            channelService: string;
-            metrics: Array<{
-              type: string;
-              name: string;
-              value: number;
-              unit: string;
-            }> | null;
-          };
-        }>;
-      };
-    }>(
-      `
-      query GetPosts($organizationId: OrganizationId!) {
-        posts(
-          input: {
-            organizationId: $organizationId
-            filter: {
-              status: [sent]
-            }
-          }
+    const posts: BufferPostNode[] = [];
+    let after: string | null = null;
+    let pageCount = 0;
+    let hasNextPage = true;
+
+    while (hasNextPage && pageCount < BUFFER_MAX_PAGES) {
+      const page = await this.request<BufferPostsPage>(
+        `
+        query GetPosts(
+          $organizationId: OrganizationId!
+          $startDate: DateTime!
+          $first: Int!
+          $after: String
         ) {
-          edges {
-            node {
-              id
-              text
-              sentAt
-              channelId
-              channelService
-              metrics {
-                type
-                name
-                value
-                unit
+          posts(
+            first: $first
+            after: $after
+            input: {
+              organizationId: $organizationId
+              filter: {
+                status: [sent]
+                startDate: $startDate
               }
+            }
+          ) {
+            edges {
+              node {
+                id
+                text
+                sentAt
+                channelId
+                channelService
+                metrics {
+                  type
+                  name
+                  value
+                  unit
+                }
+              }
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
             }
           }
         }
-      }
-      `,
-      {
-        organizationId: context.config.buffer.organizationId
-      },
-      context
-    );
+        `,
+        {
+          organizationId: context.config.buffer.organizationId,
+          startDate: BUFFER_HISTORY_START_DATE,
+          first: BUFFER_POST_PAGE_SIZE,
+          after
+        },
+        context
+      );
 
-    const postCountsByService = posts.posts.edges.reduce<Record<string, number>>((counts, edge) => {
-      const service = edge.node.channelService || "unknown";
+      posts.push(...page.posts.edges.map((edge) => edge.node));
+      pageCount += 1;
+      hasNextPage = page.posts.pageInfo.hasNextPage;
+      after = page.posts.pageInfo.endCursor;
+
+      context.logger.info("Buffer posts page loaded", {
+        page: pageCount,
+        pageSize: page.posts.edges.length,
+        totalPosts: posts.length,
+        hasNextPage
+      });
+
+      if (hasNextPage && !after) {
+        throw new Error("Buffer pagination reported another page without an end cursor");
+      }
+    }
+
+    if (hasNextPage) {
+      throw new Error(`Buffer pagination exceeded safety limit of ${BUFFER_MAX_PAGES} pages`);
+    }
+
+    const postCountsByService = posts.reduce<Record<string, number>>((counts, post) => {
+      const service = post.channelService || "unknown";
       counts[service] = (counts[service] ?? 0) + 1;
       return counts;
     }, {});
 
     context.logger.info("Buffer posts loaded", {
-      count: posts.posts.edges.length,
+      count: posts.length,
+      pages: pageCount,
+      historyStartDate: BUFFER_HISTORY_START_DATE,
       byService: postCountsByService
     });
 
     const metrics: RawConnectorMetric[] = [];
 
-    for (const edge of posts.posts.edges) {
-      const post = edge.node;
-
+    for (const post of posts) {
       if (!post.metrics) {
         continue;
       }
