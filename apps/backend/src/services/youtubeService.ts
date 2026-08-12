@@ -26,23 +26,37 @@ interface DiagnosticStep<T = unknown> {
   error?: string;
 }
 
+export interface YouTubeChannelIdentity {
+  id: string;
+  title: string;
+}
+
+export interface YouTubeAnalyticsMetrics {
+  views: number;
+  estimatedMinutesWatched: number;
+  averageViewDurationSeconds: number;
+  likes: number;
+  comments: number;
+  subscribersGained: number;
+  subscribersLost: number;
+}
+
+export interface YouTubePeriodMetrics extends YouTubeAnalyticsMetrics {
+  channel: YouTubeChannelIdentity;
+  startDate: string;
+  endDate: string;
+  videosPublished: number;
+}
+
 export interface YouTubeTestResult {
   configured: boolean;
   authorized: boolean;
   dateRange: { startDate: string; endDate: string };
   diagnostics: {
     tokenRefresh: DiagnosticStep;
-    channelIdentity: DiagnosticStep<{ id: string; title: string }>;
+    channelIdentity: DiagnosticStep<YouTubeChannelIdentity>;
     publishedVideos: DiagnosticStep<number>;
-    analytics: DiagnosticStep<{
-      views: number;
-      estimatedMinutesWatched: number;
-      averageViewDurationSeconds: number;
-      likes: number;
-      comments: number;
-      subscribersGained: number;
-      subscribersLost: number;
-    }>;
+    analytics: DiagnosticStep<YouTubeAnalyticsMetrics>;
   };
   writesPerformed: false;
 }
@@ -84,7 +98,7 @@ export class YouTubeService {
     return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
   }
 
-  async handleCallback(code: string, state: string): Promise<{ refreshToken?: string; channel: { id: string; title: string } }> {
+  async handleCallback(code: string, state: string): Promise<{ refreshToken?: string; channel: YouTubeChannelIdentity }> {
     this.assertConfigured();
     const pending = this.states.get(state);
     this.states.delete(state);
@@ -107,11 +121,35 @@ export class YouTubeService {
     return { refreshToken: token.refresh_token, channel };
   }
 
+  async getAuthorizedChannel(): Promise<YouTubeChannelIdentity> {
+    this.assertConfigured();
+    const accessToken = await this.getAccessToken();
+    return this.fetchChannel(accessToken);
+  }
+
+  async fetchPeriodMetrics(startDate: string, endDate: string): Promise<YouTubePeriodMetrics> {
+    this.assertConfigured();
+    validateRange(startDate, endDate);
+
+    const accessToken = await this.getAccessToken();
+    const [channel, analytics, videosPublished] = await Promise.all([
+      this.fetchChannel(accessToken),
+      this.fetchAnalytics(accessToken, startDate, endDate),
+      this.countPublishedVideos(accessToken, startDate, endDate)
+    ]);
+
+    return {
+      channel,
+      startDate,
+      endDate,
+      videosPublished,
+      ...analytics
+    };
+  }
+
   async test(startDate: string, endDate: string): Promise<YouTubeTestResult> {
     this.assertConfigured();
-    validateDate(startDate);
-    validateDate(endDate);
-    if (startDate > endDate) throw new Error("YouTube startDate must be on or before endDate.");
+    validateRange(startDate, endDate);
 
     const tokenStep: DiagnosticStep<string> = await diagnostic(async () => this.getAccessToken());
     if (!tokenStep.ok || !tokenStep.value) {
@@ -188,7 +226,7 @@ export class YouTubeService {
     return token.access_token;
   }
 
-  private async fetchChannel(accessToken: string): Promise<{ id: string; title: string }> {
+  private async fetchChannel(accessToken: string): Promise<YouTubeChannelIdentity> {
     const data = await googleGet<{ items?: Array<{ id?: string; snippet?: { title?: string } }> }>(
       "https://www.googleapis.com/youtube/v3/channels",
       { part: "snippet", mine: "true" },
@@ -199,7 +237,7 @@ export class YouTubeService {
     return { id: item.id, title: item.snippet?.title ?? "YouTube" };
   }
 
-  private async fetchAnalytics(accessToken: string, startDate: string, endDate: string) {
+  private async fetchAnalytics(accessToken: string, startDate: string, endDate: string): Promise<YouTubeAnalyticsMetrics> {
     const metrics = ["views", "estimatedMinutesWatched", "averageViewDuration", "likes", "comments", "subscribersGained", "subscribersLost"];
     const data = await googleGet<{ rows?: unknown[][] }>(
       "https://youtubeanalytics.googleapis.com/v2/reports",
@@ -287,6 +325,12 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(`YouTube API request failed (${status}): ${message}${details ? ` [${details}]` : ""}`);
   }
   return parsed as T;
+}
+
+function validateRange(startDate: string, endDate: string): void {
+  validateDate(startDate);
+  validateDate(endDate);
+  if (startDate > endDate) throw new Error("YouTube startDate must be on or before endDate.");
 }
 
 function validateDate(value: string): void {

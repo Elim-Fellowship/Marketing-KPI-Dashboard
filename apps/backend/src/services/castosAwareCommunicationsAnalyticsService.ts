@@ -51,6 +51,7 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
 
     replaceCastosChannel(channels, currentCastos, previousCastos);
     replaceEmailChannel(channels, kpiHistory, dateRange, previousDateRange);
+    replaceYouTubeChannel(channels, kpiHistory, dateRange, previousDateRange);
 
     const comparable = channels.filter(
       (channel) => channel.hasData && channel.metricAvailable !== false
@@ -123,9 +124,9 @@ function replaceEmailChannel(
   const index = channels.findIndex((channel) => channel.key === "email");
   if (index < 0) return;
 
-  const currentCampaigns = findMailchimpMetric(kpiHistory, "campaigns_sent", currentRange);
-  const currentClickRate = findMailchimpMetric(kpiHistory, "email_click_rate", currentRange);
-  const previousClickRate = findMailchimpMetric(kpiHistory, "email_click_rate", previousRange);
+  const currentCampaigns = findSourceMetric(kpiHistory, "mailchimp", "campaigns_sent", currentRange);
+  const currentClickRate = findSourceMetric(kpiHistory, "mailchimp", "email_click_rate", currentRange);
+  const previousClickRate = findSourceMetric(kpiHistory, "mailchimp", "email_click_rate", previousRange);
 
   if (!currentCampaigns && !currentClickRate) return;
 
@@ -147,21 +148,56 @@ function replaceEmailChannel(
   };
 }
 
-function findMailchimpMetric(
+function replaceYouTubeChannel(
+  channels: ChannelLike[],
+  kpiHistory: Array<NormalizedAirtableRecord<Fields>>,
+  currentRange: DateRangeLike,
+  previousRange: DateRangeLike
+): void {
+  const index = channels.findIndex((channel) => channel.key === "youtube");
+  if (index < 0) return;
+
+  const currentVideos = findSourceMetric(kpiHistory, "youtube", "youtube_videos_published", currentRange);
+  const currentViews = findSourceMetric(kpiHistory, "youtube", "youtube_views", currentRange);
+  const previousViews = findSourceMetric(kpiHistory, "youtube", "youtube_views", previousRange);
+
+  if (!currentVideos && !currentViews) return;
+
+  const prior = channels[index];
+  const videoCount = currentVideos ? numberField(currentVideos.fields, ["Value"]) : finiteNumber(prior.activityVolume);
+  const views = currentViews ? numberField(currentViews.fields, ["Value"]) : finiteNumber(prior.metricValue);
+  const previousViewCount = previousViews ? numberField(previousViews.fields, ["Value"]) : finiteNumber(prior.previousMetricValue);
+
+  channels[index] = {
+    ...prior,
+    activityVolume: videoCount,
+    metricLabel: "Views",
+    metricValue: views,
+    previousMetricValue: previousViewCount,
+    changePercent: calculatePercentChange(views, previousViewCount),
+    source: "KPI_History / YouTube",
+    hasData: videoCount > 0 || views > 0,
+    metricAvailable: true
+  };
+}
+
+function findSourceMetric(
   records: Array<NormalizedAirtableRecord<Fields>>,
+  sourceTerm: string,
   metricKey: string,
   range: DateRangeLike
 ): NormalizedAirtableRecord<Fields> | undefined {
   const candidates = records.filter((record) => {
     const source = [
       stringField(record.fields, ["Source Name"], ""),
+      stringField(record.fields, ["Source"], ""),
       stringField(record.fields, ["Platform"], ""),
       stringField(record.fields, ["Channel"], "")
     ].join(" ").toLowerCase();
-    if (!source.includes("mailchimp") && !source.includes("email")) return false;
+    if (!source.includes(sourceTerm.toLowerCase())) return false;
 
     const key = stringField(record.fields, ["Metric Key"], "").toLowerCase();
-    if (key !== metricKey) return false;
+    if (key !== metricKey.toLowerCase()) return false;
 
     if (!range.startDate || !range.endDate) return true;
     const start = stringField(record.fields, ["Period Start", "Date"], "");
