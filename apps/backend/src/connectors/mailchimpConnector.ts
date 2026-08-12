@@ -5,7 +5,7 @@ import type {
   ConnectorSyncResult,
   RawConnectorMetric
 } from "./types.js";
-import { MailchimpService } from "../services/mailchimpService.js";
+import { MailchimpCampaignAwareService } from "../services/mailchimpCampaignAwareService.js";
 
 export class MailchimpConnector extends BaseConnector {
   readonly metadata: ConnectorMetadata = {
@@ -43,7 +43,12 @@ export class MailchimpConnector extends BaseConnector {
       };
     }
 
-    const service = new MailchimpService(context.config, context.airtable, context.logger);
+    const service = new MailchimpCampaignAwareService(
+      context.config,
+      context.airtable,
+      context.logger,
+      context.config
+    );
     const result = await service.sync({ periodType: "both" });
     const finishedAt = new Date().toISOString();
 
