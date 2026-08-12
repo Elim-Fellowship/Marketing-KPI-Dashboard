@@ -27,6 +27,11 @@ interface AirtableWriteResponse {
   records: AirtableRecord[];
 }
 
+interface AirtableBatchUpsertResponse extends AirtableWriteResponse {
+  createdRecords?: string[];
+  updatedRecords?: string[];
+}
+
 interface AirtableErrorBody {
   error?: {
     type?: string;
@@ -49,6 +54,12 @@ export interface FindRecordsOptions {
 export interface UpsertResult {
   record: AirtableRecord;
   created: boolean;
+}
+
+export interface BatchUpsertResult {
+  attempted: number;
+  created: number;
+  updated: number;
 }
 
 export class AirtableClient {
@@ -128,34 +139,60 @@ export class AirtableClient {
     return response.records[0];
   }
 
-async upsertByUniqueKey(
-  tableName: string,
-  uniqueKeyField: string,
-  uniqueKey: string,
-  fields: AirtableFields
-): Promise<UpsertResult> {
+  async upsertByUniqueKey(
+    tableName: string,
+    uniqueKeyField: string,
+    uniqueKey: string,
+    fields: AirtableFields
+  ): Promise<UpsertResult> {
+    const existing = await this.findOneByField(
+      tableName,
+      uniqueKeyField,
+      uniqueKey
+    );
 
-  console.log("===== AIRTABLE UPSERT =====");
-  console.log("TABLE:", tableName);
-  console.log("UNIQUE FIELD:", uniqueKeyField);
-  console.log("UNIQUE KEY:", uniqueKey);
-  console.log("FIELDS:", fields);
-  console.log("===========================");
+    if (existing) {
+      const record = await this.updateRecord(tableName, existing.id, fields);
+      return { record, created: false };
+    }
 
-  const existing = await this.findOneByField(
-    tableName,
-    uniqueKeyField,
-    uniqueKey
-  );
+    const record = await this.createRecord(tableName, fields);
+    return { record, created: true };
+  }
 
-if (existing) {
-  const record = await this.updateRecord(tableName, existing.id, fields);
-  return { record, created: false };
-}
+  async batchUpsertByUniqueKey(
+    tableName: string,
+    uniqueKeyField: string,
+    records: AirtableFields[]
+  ): Promise<BatchUpsertResult> {
+    let created = 0;
+    let updated = 0;
 
-const record = await this.createRecord(tableName, fields);
-return { record, created: true };
-}
+    for (let index = 0; index < records.length; index += 10) {
+      const batch = records.slice(index, index + 10);
+      const response = await this.request<AirtableBatchUpsertResponse>(tableName, "", {
+        method: "PATCH",
+        body: JSON.stringify({
+          performUpsert: {
+            fieldsToMergeOn: [uniqueKeyField]
+          },
+          records: batch.map((fields) => ({
+            fields: removeEmptyValues(fields)
+          })),
+          typecast: true
+        })
+      });
+
+      created += response.createdRecords?.length ?? 0;
+      updated += response.updatedRecords?.length ?? 0;
+    }
+
+    return {
+      attempted: records.length,
+      created,
+      updated
+    };
+  }
 
   private buildSearchParams(options: FindRecordsOptions, offset?: string): URLSearchParams {
     const search = new URLSearchParams();
@@ -258,7 +295,7 @@ export function equalsFormula(fieldName: string, value: string): string {
 export function escapeFormulaString(value: string): string {
   return String(value ?? "")
     .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"'); 
+    .replace(/"/g, '\\"');
 }
 
 function mapAirtableError(status: number, body: string, tableName: string): AppError {
