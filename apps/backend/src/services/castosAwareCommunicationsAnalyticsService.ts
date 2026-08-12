@@ -130,9 +130,9 @@ function replaceEmailChannel(
   if (!currentCampaigns && !currentClickRate) return;
 
   const prior = channels[index];
-  const currentClicks = currentClickRate ? numberField(currentClickRate.fields, ["Numerator"], 0) : finiteNumber(prior.metricValue);
-  const previousClicks = previousClickRate ? numberField(previousClickRate.fields, ["Numerator"], 0) : finiteNumber(prior.previousMetricValue);
-  const campaignCount = currentCampaigns ? numberField(currentCampaigns.fields, ["Value"], 0) : finiteNumber(prior.activityVolume);
+  const currentClicks = currentClickRate ? numberField(currentClickRate.fields, ["Numerator"]) : finiteNumber(prior.metricValue);
+  const previousClicks = previousClickRate ? numberField(previousClickRate.fields, ["Numerator"]) : finiteNumber(prior.previousMetricValue);
+  const campaignCount = currentCampaigns ? numberField(currentCampaigns.fields, ["Value"]) : finiteNumber(prior.activityVolume);
 
   channels[index] = {
     ...prior,
