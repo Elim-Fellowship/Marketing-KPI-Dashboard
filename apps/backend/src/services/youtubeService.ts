@@ -20,19 +20,30 @@ interface StoredToken {
   refreshToken?: string;
 }
 
+interface DiagnosticStep<T = unknown> {
+  ok: boolean;
+  value?: T;
+  error?: string;
+}
+
 export interface YouTubeTestResult {
   configured: boolean;
   authorized: boolean;
-  channel?: { id: string; title: string };
   dateRange: { startDate: string; endDate: string };
-  videosPublished: number;
-  views: number;
-  estimatedMinutesWatched: number;
-  averageViewDurationSeconds: number;
-  likes: number;
-  comments: number;
-  subscribersGained: number;
-  subscribersLost: number;
+  diagnostics: {
+    tokenRefresh: DiagnosticStep;
+    channelIdentity: DiagnosticStep<{ id: string; title: string }>;
+    publishedVideos: DiagnosticStep<number>;
+    analytics: DiagnosticStep<{
+      views: number;
+      estimatedMinutesWatched: number;
+      averageViewDurationSeconds: number;
+      likes: number;
+      comments: number;
+      subscribersGained: number;
+      subscribersLost: number;
+    }>;
+  };
   writesPerformed: false;
 }
 
@@ -102,20 +113,37 @@ export class YouTubeService {
     validateDate(endDate);
     if (startDate > endDate) throw new Error("YouTube startDate must be on or before endDate.");
 
-    const accessToken = await this.getAccessToken();
-    const channel = await this.fetchChannel(accessToken);
-    const [analytics, videosPublished] = await Promise.all([
-      this.fetchAnalytics(accessToken, startDate, endDate),
-      this.countPublishedVideos(accessToken, startDate, endDate)
-    ]);
+    const tokenStep: DiagnosticStep<string> = await diagnostic(async () => this.getAccessToken());
+    if (!tokenStep.ok || !tokenStep.value) {
+      return {
+        configured: true,
+        authorized: this.authorized,
+        dateRange: { startDate, endDate },
+        diagnostics: {
+          tokenRefresh: sanitizeTokenStep(tokenStep),
+          channelIdentity: { ok: false, error: "Skipped because token refresh failed." },
+          publishedVideos: { ok: false, error: "Skipped because token refresh failed." },
+          analytics: { ok: false, error: "Skipped because token refresh failed." }
+        },
+        writesPerformed: false
+      };
+    }
+
+    const accessToken = tokenStep.value;
+    const channelIdentity = await diagnostic(async () => this.fetchChannel(accessToken));
+    const publishedVideos = await diagnostic(async () => this.countPublishedVideos(accessToken, startDate, endDate));
+    const analytics = await diagnostic(async () => this.fetchAnalytics(accessToken, startDate, endDate));
 
     return {
       configured: true,
       authorized: true,
-      channel,
       dateRange: { startDate, endDate },
-      videosPublished,
-      ...analytics,
+      diagnostics: {
+        tokenRefresh: { ok: true, value: "Access token refreshed successfully." },
+        channelIdentity,
+        publishedVideos,
+        analytics
+      },
       writesPerformed: false
     };
   }
@@ -228,6 +256,18 @@ export class YouTubeService {
   }
 }
 
+async function diagnostic<T>(operation: () => Promise<T>): Promise<DiagnosticStep<T>> {
+  try {
+    return { ok: true, value: await operation() };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function sanitizeTokenStep(step: DiagnosticStep<string>): DiagnosticStep {
+  return step.ok ? { ok: true, value: "Access token refreshed successfully." } : { ok: false, error: step.error };
+}
+
 async function googleGet<T>(url: string, params: Record<string, string>, accessToken: string): Promise<T> {
   const query = new URLSearchParams(params);
   return fetchJson<T>(`${url}?${query.toString()}`, { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -239,8 +279,12 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   let parsed: any;
   try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = { message: text }; }
   if (!response.ok) {
-    const message = parsed?.error?.message ?? parsed?.error_description ?? parsed?.message ?? `HTTP ${response.status}`;
-    throw new Error(`YouTube API request failed: ${message}`);
+    const status = `${response.status} ${response.statusText}`.trim();
+    const message = parsed?.error?.message ?? parsed?.error_description ?? parsed?.message ?? status;
+    const details = Array.isArray(parsed?.error?.errors)
+      ? parsed.error.errors.map((entry: any) => [entry?.reason, entry?.message].filter(Boolean).join(": ")).filter(Boolean).join(" | ")
+      : undefined;
+    throw new Error(`YouTube API request failed (${status}): ${message}${details ? ` [${details}]` : ""}`);
   }
   return parsed as T;
 }
