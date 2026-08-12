@@ -12,7 +12,7 @@ import { isAppError, toPublicError } from "./errors.js";
 import type { Logger } from "./logging/logger.js";
 import { serializeError } from "./logging/logger.js";
 import { AirtableService } from "./services/airtableService.js";
-import { CommunicationsAnalyticsService } from "./services/communicationsAnalyticsService.js";
+import { CastosAwareCommunicationsAnalyticsService } from "./services/castosAwareCommunicationsAnalyticsService.js";
 import { DataHealthService } from "./services/dataHealthService.js";
 import { KpiSyncService } from "./services/kpiSyncService.js";
 import { MailchimpService } from "./services/mailchimpService.js";
@@ -24,7 +24,7 @@ export function createApp(config: AppConfig, logger: Logger): express.Express {
   const airtable = new AirtableClient(config, logger.child("airtable"));
   const airtableService = new AirtableService(config, airtable);
   const syncService = new KpiSyncService(config, airtable, logger.child("sync"));
-  const analyticsService = new CommunicationsAnalyticsService(config, airtableService);
+  const analyticsService = new CastosAwareCommunicationsAnalyticsService(config, airtableService);
   const dataHealthService = new DataHealthService(airtableService);
   const mailchimpService = new MailchimpService(config, airtable, logger.child("mailchimp"));
   const ingestionSyncManager = new SyncManager({
