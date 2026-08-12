@@ -69,6 +69,31 @@ export abstract class BaseConnector implements CommunicationsConnector {
       };
     }
 
+    if (
+      payload.records.length > 0 &&
+      payload.records.every((record) =>
+        record.tableKey === "bufferPostMetrics" &&
+        record.uniqueKey.fieldName === "Source Record ID"
+      )
+    ) {
+      const tableName = context.config.airtable.tables.bufferPostMetrics;
+      const result = await context.airtable.batchUpsertByUniqueKey(
+        tableName,
+        "Source Record ID",
+        payload.records.map((record) => record.fields)
+      );
+
+      context.logger.info("Buffer Airtable batch upsert completed", result);
+
+      return {
+        attempted: result.attempted,
+        created: result.created,
+        updated: result.updated,
+        skipped: 0,
+        dryRun: false
+      };
+    }
+
     let created = 0;
     let updated = 0;
 
@@ -190,7 +215,7 @@ export abstract class BaseConnector implements CommunicationsConnector {
 
   protected toAirtableRecord(metric: NormalizedConnectorMetric): ConnectorAirtableRecord {
     if (metric.targetTableKey === "bufferPostMetrics") {
-       return toBufferAirtableRecord(metric);
+      return toBufferAirtableRecord(metric);
     }
 
     return {
