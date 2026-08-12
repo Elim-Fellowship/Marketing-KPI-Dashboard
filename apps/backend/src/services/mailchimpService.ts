@@ -127,6 +127,8 @@ export interface MailchimpIntegrationStatus {
 
 interface SyncOptions {
   periodType?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 const MAILCHIMP_REPORT_CONCURRENCY = 5;
@@ -184,7 +186,7 @@ export class MailchimpService {
 
     try {
       this.assertConfigured();
-      const periods = buildReportingPeriods(options.periodType);
+      const periods = buildReportingPeriods(options.periodType, options.startDate, options.endDate);
       const dateRange = {
         startDate: periods.map((period) => period.periodStart).sort()[0],
         endDate: periods.map((period) => period.periodEnd).sort().at(-1)
@@ -580,7 +582,21 @@ function kpiRow(
   };
 }
 
-function buildReportingPeriods(periodType?: string): ReportingPeriod[] {
+function buildReportingPeriods(periodType?: string, startDate?: string, endDate?: string): ReportingPeriod[] {
+  if (startDate || endDate) {
+    if (!startDate || !endDate) {
+      throw new Error("Mailchimp historical sync requires both startDate and endDate.");
+    }
+
+    const periodStart = parseReportingDate(startDate);
+    const periodEnd = parseReportingDate(endDate);
+    if (periodEnd.getTime() < periodStart.getTime()) {
+      throw new Error("Mailchimp historical sync endDate must be on or after startDate.");
+    }
+
+    return [reportingPeriod("Monthly", periodStart, periodEnd)];
+  }
+
   const normalized = String(periodType ?? "both").toLowerCase();
   const periods: ReportingPeriod[] = [];
 
@@ -593,6 +609,19 @@ function buildReportingPeriods(periodType?: string): ReportingPeriod[] {
   }
 
   return periods.length ? periods : [previousCompleteWeek(), previousCompleteMonth()];
+}
+
+function parseReportingDate(value: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error("Mailchimp historical sync dates must use YYYY-MM-DD format.");
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || formatDate(date) !== value) {
+    throw new Error(`Invalid Mailchimp historical sync date: ${value}`);
+  }
+
+  return date;
 }
 
 function previousCompleteWeek(): ReportingPeriod {
