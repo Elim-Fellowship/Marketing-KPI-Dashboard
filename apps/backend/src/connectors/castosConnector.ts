@@ -1,5 +1,6 @@
 import { BaseConnector } from "./baseConnector.js";
 import type {
+  ConnectorAirtablePayload,
   ConnectorAuthResult,
   ConnectorMetadata,
   ConnectorRunContext,
@@ -83,6 +84,37 @@ export class CastosConnector extends BaseConnector {
     });
 
     return metrics;
+  }
+
+  async transformData(
+    metrics: RawConnectorMetric[],
+    _context: ConnectorRunContext
+  ): Promise<ConnectorAirtablePayload> {
+    const normalized = metrics.map((metric) => this.normalizeMetric(metric));
+
+    return {
+      metrics: normalized,
+      records: normalized.map((metric) => {
+        const title = metric.contentTitle ?? `Castos Episode ${metric.sourceRecordId ?? metric.uniqueKey}`;
+        return {
+          tableKey: "contentPerformance" as const,
+          uniqueKey: {
+            fieldName: "Content Title",
+            value: title
+          },
+          fields: {
+            Platform: "Podcast",
+            "Content Title": title,
+            "Content Type": "Episode",
+            "Publish Date": metric.date,
+            "Metric Type": "Podcasts Published",
+            "Metric Value": metric.value,
+            "Source Platform": "Castos",
+            Notes: `Castos episode ${metric.sourceRecordId ?? ""}; podcast ${String(metric.dimensions?.podcastId ?? "")}. Download/listen analytics are not included because no supported Castos analytics endpoint has been validated.`
+          }
+        };
+      })
+    };
   }
 
   protected async getMockMetrics(_context: ConnectorRunContext): Promise<RawConnectorMetric[]> { return []; }
