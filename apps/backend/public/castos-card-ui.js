@@ -1,8 +1,28 @@
-function patchCastosCard() {
+const activityLabels = {
+  instagram: "Posts / reels published",
+  facebook: "Posts / reels published",
+  email: "Email campaigns sent",
+  spotify: "Episodes tracked",
+  castos: "Podcast episodes published",
+  youtube: "Videos published",
+  website: "Articles / pages published",
+  "voice of elim": "Email campaigns sent",
+  "elim updates": "Email campaigns sent"
+};
+
+function patchChannelCards() {
   const cards = document.querySelectorAll(".breakdown-card");
   for (const card of cards) {
-    const label = card.querySelector(".channel-label")?.textContent?.trim().toLowerCase();
-    if (label !== "castos") continue;
+    const channelLabel = card.querySelector(".channel-label")?.textContent?.trim().toLowerCase();
+    if (!channelLabel) continue;
+
+    const volumeLabel = card.querySelector(".breakdown-volume span");
+    const activityLabel = activityLabels[channelLabel];
+    if (volumeLabel && activityLabel && volumeLabel.textContent !== activityLabel) {
+      volumeLabel.textContent = activityLabel;
+    }
+
+    if (channelLabel !== "castos") continue;
 
     const metric = card.querySelector(".breakdown-metric");
     if (metric && !metric.dataset.castosUnavailable) {
@@ -25,9 +45,9 @@ function patchCastosCard() {
   }
 }
 
-patchCastosCard();
+patchChannelCards();
 
 // The dashboard re-renders cards when filters or pages change. Polling is
-// intentionally used instead of MutationObserver so updating the Castos card
-// cannot recursively trigger the patch itself.
-window.setInterval(patchCastosCard, 1000);
+// intentionally used instead of MutationObserver so card label updates cannot
+// recursively trigger themselves.
+window.setInterval(patchChannelCards, 1000);
