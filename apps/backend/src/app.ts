@@ -17,6 +17,7 @@ import { DataHealthService } from "./services/dataHealthService.js";
 import { KpiSyncService } from "./services/kpiSyncService.js";
 import { MailchimpCampaignAwareService } from "./services/mailchimpCampaignAwareService.js";
 import { SyncManager } from "./services/syncManager.js";
+import { YouTubeService } from "./services/youtubeService.js";
 import type { AirtableTableKey } from "./types/airtableTables.js";
 
 export function createApp(config: AppConfig, logger: Logger): express.Express {
@@ -27,40 +28,18 @@ export function createApp(config: AppConfig, logger: Logger): express.Express {
   const analyticsService = new CastosAwareCommunicationsAnalyticsService(config, airtableService);
   const dataHealthService = new DataHealthService(airtableService);
   const mailchimpService = new MailchimpCampaignAwareService(config, airtable, logger.child("mailchimp"), config);
-  const ingestionSyncManager = new SyncManager({
-    config,
-    airtable,
-    logger: logger.child("ingestion"),
-    connectors: createIngestionConnectors()
-  });
+  const youtubeService = new YouTubeService(config);
+  const ingestionSyncManager = new SyncManager({ config, airtable, logger: logger.child("ingestion"), connectors: createIngestionConnectors() });
 
   app.use(cors({ origin: config.frontendOrigin === "*" ? true : config.frontendOrigin }));
   app.use(express.json({ limit: "1mb" }));
   app.use(requestLogger(logger));
 
-  app.get("/health", (_request, response) => {
-    response.json({ ok: true, service: "communications-intelligence-platform", stage: "communications-analytics" });
-  });
-
-  app.post("/sync", requireSyncAuth(config), asyncHandler(async (_request, response) => {
-    const result = await syncService.runSync();
-    response.status(result.status === "Success" ? 200 : 500).json({ result });
-  }));
-
-  app.get("/kpis", asyncHandler(async (request, response) => {
-    const records = await airtableService.getRecords("kpis", { maxRecords: parseLimit(request.query.limit), sort: [{ field: FIELDS.kpis.name, direction: "asc" }] });
-    response.json({ records });
-  }));
-
-  app.get("/records", asyncHandler(async (request, response) => {
-    const records = await airtableService.getRecords("kpiRecords", { maxRecords: parseLimit(request.query.limit), sort: [{ field: FIELDS.records.reportingDate, direction: "desc" }] });
-    response.json({ records });
-  }));
-
-  app.get("/jobs", asyncHandler(async (request, response) => {
-    const records = await airtable.findRecords(config.airtable.tables.importJobs, { maxRecords: parseLimit(request.query.limit), sort: [{ field: FIELDS.jobs.startedAt, direction: "desc" }] });
-    response.json({ records });
-  }));
+  app.get("/health", (_request, response) => { response.json({ ok: true, service: "communications-intelligence-platform", stage: "communications-analytics" }); });
+  app.post("/sync", requireSyncAuth(config), asyncHandler(async (_request, response) => { const result = await syncService.runSync(); response.status(result.status === "Success" ? 200 : 500).json({ result }); }));
+  app.get("/kpis", asyncHandler(async (request, response) => { const records = await airtableService.getRecords("kpis", { maxRecords: parseLimit(request.query.limit), sort: [{ field: FIELDS.kpis.name, direction: "asc" }] }); response.json({ records }); }));
+  app.get("/records", asyncHandler(async (request, response) => { const records = await airtableService.getRecords("kpiRecords", { maxRecords: parseLimit(request.query.limit), sort: [{ field: FIELDS.records.reportingDate, direction: "desc" }] }); response.json({ records }); }));
+  app.get("/jobs", asyncHandler(async (request, response) => { const records = await airtable.findRecords(config.airtable.tables.importJobs, { maxRecords: parseLimit(request.query.limit), sort: [{ field: FIELDS.jobs.startedAt, direction: "desc" }] }); response.json({ records }); }));
 
   app.get("/api/home", asyncHandler(async (_request, response) => { response.json(await analyticsService.getHomepage()); }));
   app.get("/api/overview", asyncHandler(async (request, response) => { response.json(await analyticsService.getOverview({ startDate: optionalString(request.query.startDate), endDate: optionalString(request.query.endDate), dateMode: optionalString(request.query.dateMode) })); }));
@@ -70,11 +49,39 @@ export function createApp(config: AppConfig, logger: Logger): express.Express {
   app.get("/api/status", asyncHandler(async (_request, response) => { response.json(await analyticsService.getStatus()); }));
   app.get("/api/data-health", asyncHandler(async (_request, response) => { response.json(await dataHealthService.getDataHealth()); }));
 
-  app.get("/api/integrations/mailchimp/sync", requireSyncAuth(config), asyncHandler(async (request, response) => {
-    const result = await mailchimpService.sync({ periodType: optionalString(request.query.periodType), startDate: optionalString(request.query.startDate), endDate: optionalString(request.query.endDate) });
-    response.json({ result });
-  }));
+  app.get("/api/integrations/mailchimp/sync", requireSyncAuth(config), asyncHandler(async (request, response) => { const result = await mailchimpService.sync({ periodType: optionalString(request.query.periodType), startDate: optionalString(request.query.startDate), endDate: optionalString(request.query.endDate) }); response.json({ result }); }));
   app.get("/api/integrations/mailchimp/status", (_request, response) => { response.json({ status: mailchimpService.getStatus() }); });
+
+  app.get("/api/integrations/youtube/status", (_request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    response.json({ configured: youtubeService.configured, authorized: youtubeService.authorized, redirectUri: config.youtube.redirectUri });
+  });
+  app.get("/api/integrations/youtube/oauth/start", (_request, response) => {
+    response.redirect(youtubeService.createAuthorizationUrl());
+  });
+  app.get("/api/integrations/youtube/oauth/callback", asyncHandler(async (request, response) => {
+    const oauthError = optionalString(request.query.error);
+    if (oauthError) {
+      response.status(400).send(`<h1>YouTube authorization failed</h1><p>${escapeHtml(oauthError)}</p>`);
+      return;
+    }
+    const code = optionalString(request.query.code);
+    const state = optionalString(request.query.state);
+    if (!code || !state) {
+      response.status(400).send("<h1>YouTube authorization failed</h1><p>Missing authorization code or state.</p>");
+      return;
+    }
+    const result = await youtubeService.handleCallback(code, state);
+    const refreshToken = result.refreshToken;
+    response.setHeader("Cache-Control", "no-store");
+    response.send(`<!doctype html><html><body style="font-family:system-ui;max-width:760px;margin:40px auto;padding:0 20px"><h1>YouTube connected</h1><p>Authorized channel: <strong>${escapeHtml(result.channel.title)}</strong></p>${refreshToken ? `<p>Copy the value below into Render as <strong>YOUTUBE_REFRESH_TOKEN</strong>. Treat it like a password and do not paste it into ChatGPT.</p><pre style="white-space:pre-wrap;word-break:break-all;padding:16px;background:#f3f4f6;border-radius:8px">${escapeHtml(refreshToken)}</pre>` : "<p>No new refresh token was returned. Revoke the app grant in your Google Account and authorize again if YOUTUBE_REFRESH_TOKEN is not already saved in Render.</p>"}<p>After saving the refresh token in Render and redeploying, close this page.</p></body></html>`);
+  }));
+  app.get("/api/integrations/youtube/test", requireSyncAuth(config), asyncHandler(async (request, response) => {
+    const startDate = optionalString(request.query.startDate) ?? "2026-07-01";
+    const endDate = optionalString(request.query.endDate) ?? "2026-07-31";
+    response.setHeader("Cache-Control", "no-store");
+    response.json({ result: await youtubeService.test(startDate, endDate) });
+  }));
 
   app.get("/api/integrations/buffer/test", asyncHandler(async (_request, response) => {
     const result = await ingestionSyncManager.run({ connectorId: "buffer", dryRun: true, requestedBy: "api" });
@@ -86,10 +93,7 @@ export function createApp(config: AppConfig, logger: Logger): express.Express {
   app.get("/api/debug/sync-auth", (_request, response) => { response.json({ syncApiKeyConfigured: Boolean(config.syncApiKey), syncApiKeyLength: config.syncApiKey?.length ?? 0, syncApiKeyStartsWith: config.syncApiKey?.slice(0, 3) ?? null, nodeEnv: config.nodeEnv }); });
   app.get("/api/ingestion/connectors", (_request, response) => { response.json({ connectors: ingestionSyncManager.listConnectors(), futureConnectors: futureConnectorPlaceholders }); });
   app.get("/api/ingestion/status", (_request, response) => { response.json({ statuses: ingestionSyncManager.getStatuses(), history: ingestionSyncManager.getHistory() }); });
-  app.post("/api/ingestion/sync", requireSyncAuth(config), asyncHandler(async (request, response) => {
-    const result = await ingestionSyncManager.run({ connectorId: optionalString(request.body?.connectorId) ?? optionalString(request.query.connectorId), dryRun: parseBoolean(request.body?.dryRun ?? request.query.dryRun, true), requestedBy: "api", csv: request.body?.csv });
-    response.json({ result });
-  }));
+  app.post("/api/ingestion/sync", requireSyncAuth(config), asyncHandler(async (request, response) => { const result = await ingestionSyncManager.run({ connectorId: optionalString(request.body?.connectorId) ?? optionalString(request.query.connectorId), dryRun: parseBoolean(request.body?.dryRun ?? request.query.dryRun, true), requestedBy: "api", csv: request.body?.csv }); response.json({ result }); }));
 
   app.get("/api/airtable", asyncHandler(async (_request, response) => { response.json({ tables: await airtableService.getAllRequestedTables() }); }));
   app.get("/api/comms/tables", asyncHandler(async (_request, response) => { response.json({ tables: await airtableService.getCommunicationsTables() }); }));
@@ -115,6 +119,7 @@ function asyncHandler(handler: (request: Request, response: Response, next: Next
 function parseLimit(value: unknown): number { const parsed = Number.parseInt(String(value ?? "100"), 10); return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 100) : 100; }
 function optionalString(value: unknown): string | undefined { return typeof value === "string" && value.trim() ? value.trim() : undefined; }
 function parseBoolean(value: unknown, fallback: boolean): boolean { if (typeof value === "boolean") return value; if (typeof value !== "string") return fallback; const normalized = value.trim().toLowerCase(); if (["true", "1", "yes"].includes(normalized)) return true; if (["false", "0", "no"].includes(normalized)) return false; return fallback; }
+function escapeHtml(value: string): string { return value.replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character] ?? character); }
 
 const airtableRoutes: Array<{ path: string; tableKey: AirtableTableKey }> = [
   { path: "/api/airtable/kpi-sources", tableKey: "kpiSources" }, { path: "/api/airtable/kpis", tableKey: "kpis" }, { path: "/api/airtable/kpi-records", tableKey: "kpiRecords" }, { path: "/api/airtable/dashboard-views", tableKey: "dashboardViews" }, { path: "/api/airtable/alerts", tableKey: "alerts" }, { path: "/api/airtable/spotify-weekly-snapshot", tableKey: "spotifyWeeklySnapshot" }, { path: "/api/airtable/content-performance", tableKey: "contentPerformance" }, { path: "/api/airtable/kpi-history", tableKey: "kpiHistory" }, { path: "/api/airtable/data-source-status", tableKey: "dataSourceStatus" }, { path: "/api/airtable/channel-performance", tableKey: "channelPerformance" }, { path: "/api/airtable/monthly-activity-summary", tableKey: "monthlyActivitySummary" }
