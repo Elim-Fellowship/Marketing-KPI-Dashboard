@@ -13,7 +13,9 @@ interface CastosPodcast {
 }
 
 interface CastosPodcastResponse {
-  data?: CastosPodcast[];
+  data?: CastosPodcast[] | {
+    podcast_list?: Record<string, string>;
+  };
   podcasts?: CastosPodcast[];
 }
 
@@ -108,6 +110,10 @@ export class CastosConnector extends BaseConnector {
 
     if (Array.isArray(json.data)) {
       return json.data;
+    }
+
+    if (json.data && !Array.isArray(json.data) && json.data.podcast_list) {
+      return Object.entries(json.data.podcast_list).map(([id, title]) => ({ id, title }));
     }
 
     if (Array.isArray(json.podcasts)) {
