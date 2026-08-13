@@ -79,6 +79,14 @@ function trendStatus(channel) {
   return { key: "stable", arrow: "→", label: "Stable", value };
 }
 
+function trendStatusCounts(channels = []) {
+  return channels.reduce((counts, channel) => {
+    const status = trendStatus(channel);
+    counts[status.key] = (counts[status.key] ?? 0) + 1;
+    return counts;
+  }, { up: 0, stable: 0, down: 0, unavailable: 0 });
+}
+
 function trendStyles() {
   if (document.querySelector("#content-trend-analysis-styles")) return;
   const style = document.createElement("style");
@@ -90,9 +98,13 @@ function trendStyles() {
     .content-trend-period{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:8px 13px;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
     .content-trend-period:hover{border-color:#94a3b8;background:#f8fafc}
     .content-trend-period.active{background:#0f172a;border-color:#0f172a;color:#fff}
-    .content-trend-legend{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:13px;font-weight:700}
+    .content-trend-legend{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:13px;font-weight:700}
     .content-trend-legend small{font-weight:500;color:#64748b;margin-left:auto}
     .content-trend-legend .legend-up{color:#16803c}.content-trend-legend .legend-stable{color:#2563eb}.content-trend-legend .legend-down{color:#c53030}
+    .content-trend-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+    .content-trend-summary-item{border:1px solid #e2e8f0;border-radius:12px;padding:11px 13px;background:#f8fafc;display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .content-trend-summary-item span{font-size:12px;font-weight:700;color:#64748b}.content-trend-summary-item strong{font-size:18px;color:#0f172a}
+    .content-trend-summary-up{border-left:4px solid #16803c}.content-trend-summary-stable{border-left:4px solid #2563eb}.content-trend-summary-down{border-left:4px solid #c53030}.content-trend-summary-unavailable{border-left:4px solid #94a3b8}
     .content-trend-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
     .content-trend-card{border:1px solid #e2e8f0;border-radius:14px;padding:18px;background:#fff;min-height:128px}
     .content-trend-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
@@ -105,8 +117,8 @@ function trendStyles() {
     .content-trend-unavailable{border-top:4px solid #94a3b8}.content-trend-unavailable .content-trend-arrow,.content-trend-unavailable .content-trend-card-result span{color:#64748b}
     .content-trend-footnote{margin:15px 0 0;color:#64748b;font-size:12px}
     .content-trend-all-message{grid-column:1/-1;border:1px dashed #cbd5e1;border-radius:14px;padding:22px;background:#f8fafc;display:flex;flex-direction:column;gap:6px}.content-trend-all-message strong{color:#0f172a}.content-trend-all-message span{color:#64748b;font-size:14px}
-    @media(max-width:1000px){.content-trend-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    @media(max-width:700px){.content-trend-analysis-header{flex-direction:column}.content-trend-periods{justify-content:flex-start}.content-trend-grid{grid-template-columns:1fr}.content-trend-legend small{width:100%;margin-left:0}}
+    @media(max-width:1000px){.content-trend-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.content-trend-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:700px){.content-trend-analysis-header{flex-direction:column}.content-trend-periods{justify-content:flex-start}.content-trend-grid{grid-template-columns:1fr}.content-trend-summary{grid-template-columns:1fr}.content-trend-legend small{width:100%;margin-left:0}}
   `;
   document.head.appendChild(style);
 }
@@ -124,6 +136,16 @@ function renderTrendCard(channel) {
   `;
 }
 
+function renderTrendSummary(channels = []) {
+  const counts = trendStatusCounts(channels);
+  return `
+    <div class="content-trend-summary-item content-trend-summary-up"><span>Improving</span><strong>${counts.up}</strong></div>
+    <div class="content-trend-summary-item content-trend-summary-stable"><span>Stable</span><strong>${counts.stable}</strong></div>
+    <div class="content-trend-summary-item content-trend-summary-down"><span>Declining</span><strong>${counts.down}</strong></div>
+    <div class="content-trend-summary-item content-trend-summary-unavailable"><span>Insufficient history</span><strong>${counts.unavailable}</strong></div>
+  `;
+}
+
 function trendAnalysisShell() {
   return `
     <section class="band content-trend-analysis" id="content-trend-analysis">
@@ -138,6 +160,7 @@ function trendAnalysisShell() {
         </div>
       </div>
       <div class="content-trend-legend"><span class="legend-up">↑ Improving</span><span class="legend-stable">→ Stable</span><span class="legend-down">↓ Declining</span><small>Stable zone: within ±${CONTENT_TREND_STABLE_THRESHOLD}%</small></div>
+      <div class="content-trend-summary" id="content-trend-summary" aria-label="Channel health summary"></div>
       <div class="content-trend-grid" id="content-trend-grid"><div class="empty-state">Loading channel health...</div></div>
       <p class="content-trend-footnote" id="content-trend-footnote">Compared with the immediately preceding equivalent period.</p>
     </section>
@@ -175,10 +198,12 @@ function ensureContentTrendAnalysis() {
 
 async function loadContentTrendAnalysis() {
   const grid = document.querySelector("#content-trend-grid");
+  const summary = document.querySelector("#content-trend-summary");
   const footnote = document.querySelector("#content-trend-footnote");
-  if (!grid || !footnote) return;
+  if (!grid || !summary || !footnote) return;
 
   if (contentTrendPeriod === "all") {
+    summary.innerHTML = "";
     grid.innerHTML = `<div class="content-trend-all-message"><strong>Long-term health needs a dedicated baseline.</strong><span>The All view is reserved until enough historical coverage exists for a defensible long-term comparison.</span></div>`;
     footnote.textContent = "All-time classification is intentionally withheld rather than treating incomplete history as a stable trend.";
     return;
@@ -186,8 +211,9 @@ async function loadContentTrendAnalysis() {
 
   const requestId = ++contentTrendRequestId;
   const range = rollingTrendRange(contentTrendPeriod);
+  summary.innerHTML = "";
   grid.innerHTML = `<div class="empty-state">Loading channel health...</div>`;
-  footnote.textContent = "Compared with the immediately preceding equivalent period.";
+  footnote.textContent = `Selected ${CONTENT_TREND_PERIODS[contentTrendPeriod].label.toLowerCase()} compared with the immediately preceding equivalent period.`;
 
   try {
     const params = new URLSearchParams({ startDate: range.startDate, endDate: range.endDate, dateMode: "custom" });
@@ -196,9 +222,11 @@ async function loadContentTrendAnalysis() {
     const data = await response.json();
     if (requestId !== contentTrendRequestId) return;
     const channels = data.channels ?? [];
+    summary.innerHTML = channels.length ? renderTrendSummary(channels) : "";
     grid.innerHTML = channels.length ? channels.map(renderTrendCard).join("") : `<div class="empty-state">No channel analytics are available for this timeframe.</div>`;
   } catch (error) {
     if (requestId !== contentTrendRequestId) return;
+    summary.innerHTML = "";
     grid.innerHTML = `<div class="empty-state">Unable to load channel health right now.</div>`;
     console.error("Content Trend Analysis:", error);
   }
