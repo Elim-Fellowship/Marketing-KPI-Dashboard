@@ -9,6 +9,21 @@ const CONTENT_TREND_PERIODS = {
   all: { label: "All" }
 };
 
+// Phase-one health definitions intentionally use the engagement signal currently
+// returned by the normalized Channel Breakdown backend. This makes the metric
+// explicit without inventing a second calculation in the browser.
+const CONTENT_TREND_HEALTH_DEFINITIONS = {
+  instagram: { label: "Likes", description: "Audience reactions to Instagram content" },
+  facebook: { label: "Likes", description: "Audience reactions to Facebook content" },
+  email: { label: "Clicks", description: "Link-click engagement with email campaigns" },
+  spotify: { label: "Streams", description: "Podcast listening activity on Spotify" },
+  castos: { label: "Downloads", description: "Podcast download activity through Castos" },
+  youtube: { label: "Views / Streams", description: "Video viewing activity on YouTube" },
+  website: { label: "Current backend engagement signal", description: "Website engagement signal returned by Channel Breakdown" },
+  voiceOfElim: { label: "Current backend engagement signal", description: "Reader engagement with Voice of Elim content" },
+  elimUpdates: { label: "Current backend engagement signal", description: "Reader engagement with Elim Updates content" }
+};
+
 const CONTENT_TREND_STABLE_THRESHOLD = 5;
 let contentTrendPeriod = "90d";
 let contentTrendRequestId = 0;
@@ -56,6 +71,16 @@ function rollingTrendRange(periodKey) {
   }
 
   return { startDate: isoTrendDate(start), endDate: isoTrendDate(end) };
+}
+
+function healthDefinition(channel) {
+  const configured = CONTENT_TREND_HEALTH_DEFINITIONS[channel?.key];
+  return {
+    label: configured?.label === "Current backend engagement signal"
+      ? (channel?.metricLabel ?? "Engagement")
+      : (configured?.label ?? channel?.metricLabel ?? "Engagement"),
+    description: configured?.description ?? "Normalized channel engagement"
+  };
 }
 
 function trendStatus(channel) {
@@ -106,11 +131,12 @@ function trendStyles() {
     .content-trend-summary-item span{font-size:12px;font-weight:700;color:#64748b}.content-trend-summary-item strong{font-size:18px;color:#0f172a}
     .content-trend-summary-up{border-left:4px solid #16803c}.content-trend-summary-stable{border-left:4px solid #2563eb}.content-trend-summary-down{border-left:4px solid #c53030}.content-trend-summary-unavailable{border-left:4px solid #94a3b8}
     .content-trend-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
-    .content-trend-card{border:1px solid #e2e8f0;border-radius:14px;padding:18px;background:#fff;min-height:128px}
+    .content-trend-card{border:1px solid #e2e8f0;border-radius:14px;padding:18px;background:#fff;min-height:142px}
     .content-trend-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
     .content-trend-card h4{margin:0;font-size:17px;color:#0f172a}.content-trend-card-header span{display:block;margin-top:4px;color:#64748b;font-size:12px}
+    .content-trend-signal{margin-top:8px;color:#475569;font-size:12px;line-height:1.35}
     .content-trend-arrow{font-size:34px;font-weight:800;line-height:1}
-    .content-trend-card-result{display:flex;align-items:baseline;gap:9px;margin-top:22px}.content-trend-card-result strong{font-size:24px;color:#0f172a}.content-trend-card-result span{font-size:13px;font-weight:700}
+    .content-trend-card-result{display:flex;align-items:baseline;gap:9px;margin-top:18px}.content-trend-card-result strong{font-size:24px;color:#0f172a}.content-trend-card-result span{font-size:13px;font-weight:700}
     .content-trend-up{border-top:4px solid #16803c}.content-trend-up .content-trend-arrow,.content-trend-up .content-trend-card-result span{color:#16803c}
     .content-trend-stable{border-top:4px solid #2563eb}.content-trend-stable .content-trend-arrow,.content-trend-stable .content-trend-card-result span{color:#2563eb}
     .content-trend-down{border-top:4px solid #c53030}.content-trend-down .content-trend-arrow,.content-trend-down .content-trend-card-result span{color:#c53030}
@@ -125,10 +151,15 @@ function trendStyles() {
 
 function renderTrendCard(channel) {
   const status = trendStatus(channel);
+  const health = healthDefinition(channel);
   return `
     <article class="content-trend-card content-trend-${status.key}">
       <div class="content-trend-card-header">
-        <div><h4>${escapeTrendHtml(channel.label ?? channel.key ?? "Channel")}</h4><span>${escapeTrendHtml(channel.metricLabel ?? "Engagement")}</span></div>
+        <div>
+          <h4>${escapeTrendHtml(channel.label ?? channel.key ?? "Channel")}</h4>
+          <span>Health signal: ${escapeTrendHtml(health.label)}</span>
+          <div class="content-trend-signal">${escapeTrendHtml(health.description)}</div>
+        </div>
         <div class="content-trend-arrow" aria-hidden="true">${status.arrow}</div>
       </div>
       <div class="content-trend-card-result"><strong>${status.value}</strong><span>${status.label}</span></div>
