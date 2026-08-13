@@ -37,5 +37,24 @@
     </div>
     <script src="/app.js" type="module"></script>
     <script src="/castos-card-ui.js" type="module"></script>
+    <script>
+      // Temporary UI feature gate. The legacy Content Trends implementation
+      // remains in app.js for rollback while Content Trend Analysis is developed.
+      const hideLegacyContentTrends = () => {
+        document.querySelectorAll("#page-root section").forEach((section) => {
+          const title = section.querySelector("h3.section-title");
+          if (title && title.textContent.trim() === "Content Trends") {
+            section.hidden = true;
+            section.setAttribute("aria-hidden", "true");
+            section.dataset.featureState = "deprecated";
+          }
+        });
+      };
+
+      const pageRoot = document.querySelector("#page-root");
+      const legacyContentTrendsObserver = new MutationObserver(hideLegacyContentTrends);
+      legacyContentTrendsObserver.observe(pageRoot, { childList: true, subtree: true });
+      hideLegacyContentTrends();
+    </script>
   </body>
 </html>
