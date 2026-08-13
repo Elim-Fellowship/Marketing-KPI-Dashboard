@@ -24,9 +24,18 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
     const previousCastos = filterCastosEpisodes(contentPerformance, previousDateRange);
     const currentSpotify = filterSpotifyEpisodes(spotifyEpisodes, dateRange);
     const previousSpotify = filterSpotifyEpisodes(spotifyEpisodes, previousDateRange);
+    const currentSpotifyConsumption = filterSpotifyKpiRecords(kpiHistory, "spotify_consumption_hours", dateRange);
+    const previousSpotifyConsumption = filterSpotifyKpiRecords(kpiHistory, "spotify_consumption_hours", previousDateRange);
+    const currentSpotifyTopEpisodes = filterSpotifyKpiRecords(kpiHistory, "spotify_episode_consumption_hours", dateRange);
+    const previousSpotifyTopEpisodes = filterSpotifyKpiRecords(kpiHistory, "spotify_episode_consumption_hours", previousDateRange);
     const channels = Array.isArray(base.channels) ? [...base.channels] as ChannelLike[] : [];
 
-    replaceSpotifyChannel(channels, currentSpotify, previousSpotify);
+    const usingNormalizedSpotify = currentSpotifyConsumption.length > 0;
+    if (usingNormalizedSpotify) {
+      replaceSpotifyConsumptionChannel(channels, currentSpotifyConsumption, previousSpotifyConsumption, currentSpotifyTopEpisodes);
+    } else {
+      replaceSpotifyChannel(channels, currentSpotify, previousSpotify);
+    }
     replaceCastosChannel(channels, currentCastos, previousCastos);
     replaceEmailChannel(channels, kpiHistory, dateRange, previousDateRange);
     replaceYouTubeChannel(channels, kpiHistory, dateRange, previousDateRange);
@@ -41,11 +50,36 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
       ...base,
       channels,
       summary: { ...(base.summary ?? {}), currentValue: currentTotal, previousValue: previousTotal, changePercent: comparable.length ? calculatePercentChange(currentTotal, previousTotal) : undefined, channelCount: comparable.length },
-      spotifyDataState: { source: "Spotify_Episode_Metrics", currentEpisodesPublished: currentSpotify.length, previousEpisodesPublished: previousSpotify.length },
+      spotifyDataState: usingNormalizedSpotify
+        ? { source: "KPI_History / Spotify", currentEpisodesTracked: currentSpotifyTopEpisodes.length, previousEpisodesTracked: previousSpotifyTopEpisodes.length, metric: "Consumption Hours" }
+        : { source: "Spotify_Episode_Metrics", currentEpisodesPublished: currentSpotify.length, previousEpisodesPublished: previousSpotify.length, metric: "Streams" },
       castosDataState: { activitySource: "Content_Performance", currentEpisodesPublished: currentCastos.length, previousEpisodesPublished: previousCastos.length, audienceMetricAvailable: false },
       trends: { ...(base.trends ?? {}), channels: channels.map((channel) => ({ key: channel.key, label: channel.label, color: channel.color, metricLabel: channel.metricLabel, series: channel.series ?? [] })) }
     };
   }
+}
+
+function replaceSpotifyConsumptionChannel(channels: ChannelLike[], currentRecords: Array<NormalizedAirtableRecord<Fields>>, previousRecords: Array<NormalizedAirtableRecord<Fields>>, currentTopEpisodes: Array<NormalizedAirtableRecord<Fields>>): void {
+  const index = channels.findIndex((channel) => channel.key === "spotify");
+  const prior = index >= 0 ? channels[index] : undefined;
+  const currentHours = sumMetricValues(currentRecords);
+  const previousHours = sumMetricValues(previousRecords);
+  const channel: ChannelLike = {
+    key: "spotify",
+    label: prior?.label ?? "Spotify",
+    metricLabel: "Consumption Hours",
+    color: prior?.color ?? "#1DB954",
+    activityVolume: currentTopEpisodes.length,
+    metricValue: currentHours,
+    previousMetricValue: previousHours,
+    changePercent: previousHours > 0 ? calculatePercentChange(currentHours, previousHours) : undefined,
+    source: "KPI_History / Spotify",
+    hasData: currentRecords.length > 0,
+    metricAvailable: true,
+    metricNote: currentTopEpisodes.length > 0 ? `${currentTopEpisodes.length} top episodes tracked for the reporting period.` : undefined,
+    series: buildMetricSeries(currentRecords)
+  };
+  if (index >= 0) channels[index] = channel; else channels.push(channel);
 }
 
 function replaceSpotifyChannel(channels: ChannelLike[], currentSpotify: Array<NormalizedAirtableRecord<Fields>>, previousSpotify: Array<NormalizedAirtableRecord<Fields>>): void {
@@ -74,12 +108,26 @@ function sumSpotifyStreams(records: Array<NormalizedAirtableRecord<Fields>>): nu
   return records.reduce((sum, record) => sum + numberField(record.fields, ["Total Streams", "Streams", "Plays", "Value"]), 0);
 }
 
+function sumMetricValues(records: Array<NormalizedAirtableRecord<Fields>>): number {
+  return records.reduce((sum, record) => sum + numberField(record.fields, ["Value"]), 0);
+}
+
 function buildSpotifySeries(records: Array<NormalizedAirtableRecord<Fields>>): Array<{ date: string; value: number }> {
   const points = new Map<string, number>();
   for (const record of records) {
     const date = dateField(record.fields, ["Publish Date", "Reporting Week", "Reporting Month", "Date", "Week", "Snapshot Date"]);
     if (!date) continue;
     points.set(date, (points.get(date) ?? 0) + numberField(record.fields, ["Total Streams", "Streams", "Plays", "Value"]));
+  }
+  return [...points.entries()].map(([date, value]) => ({ date, value })).sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function buildMetricSeries(records: Array<NormalizedAirtableRecord<Fields>>): Array<{ date: string; value: number }> {
+  const points = new Map<string, number>();
+  for (const record of records) {
+    const date = dateField(record.fields, ["Date", "Snapshot Date", "Period End"]);
+    if (!date) continue;
+    points.set(date, (points.get(date) ?? 0) + numberField(record.fields, ["Value"]));
   }
   return [...points.entries()].map(([date, value]) => ({ date, value })).sort((left, right) => left.date.localeCompare(right.date));
 }
@@ -140,6 +188,22 @@ function findSourceMetric(records: Array<NormalizedAirtableRecord<Fields>>, sour
     return start === range.startDate && end === range.endDate;
   });
   return candidates.find((record) => stringField(record.fields, ["Period Type"], "").toLowerCase() === "monthly") ?? candidates[0];
+}
+
+function filterSpotifyKpiRecords(records: Array<NormalizedAirtableRecord<Fields>>, metricKey: string, range: DateRangeLike): Array<NormalizedAirtableRecord<Fields>> {
+  return records.filter((record) => {
+    const source = [stringField(record.fields, ["Source Name"], ""), stringField(record.fields, ["Platform"], "")].join(" ").toLowerCase();
+    if (!source.includes("spotify")) return false;
+    if (stringField(record.fields, ["Metric Key"], "").toLowerCase() !== metricKey.toLowerCase()) return false;
+    if (!range.startDate || !range.endDate) return true;
+    if (metricKey === "spotify_episode_consumption_hours") {
+      const start = stringField(record.fields, ["Period Start"], "");
+      const end = stringField(record.fields, ["Period End"], "");
+      return start === range.startDate && end === range.endDate;
+    }
+    const date = dateField(record.fields, ["Date", "Snapshot Date"]);
+    return Boolean(date && date >= range.startDate && date <= range.endDate);
+  });
 }
 
 function filterSpotifyEpisodes(records: Array<NormalizedAirtableRecord<Fields>>, range: DateRangeLike): Array<NormalizedAirtableRecord<Fields>> {
