@@ -59,9 +59,9 @@
             </label>
 
             <div class="import-controls">
-              <label class="access-key-field">Import access key
-                <input id="import-key" type="password" autocomplete="off" placeholder="Enter staff import key">
-                <span>The key is kept only for this browser session.</span>
+              <label class="access-key-field">Staff PIN
+                <input id="import-key" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="Enter 6-digit PIN">
+                <span>The PIN is kept only for this browser session and is used only for Spotify data imports.</span>
               </label>
               <button id="import-button" class="primary-action" type="button" disabled>Import Spotify Data</button>
             </div>
