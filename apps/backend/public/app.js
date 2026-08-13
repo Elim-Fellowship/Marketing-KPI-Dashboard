@@ -88,11 +88,10 @@ function setActiveNav(pageKey) {
 }
 
 async function renderOverview() {
-  const overview = await fetchJson(`/api/overview${overviewQueryString()}`);
-  const growthRates = overview.growthRates ?? overview.growthIndicators ?? [];
-  const series = overview.charts?.overviewTrendSeries ?? overview.charts?.spotifySeries ?? [];
-  const growthCards = buildOverviewGrowthIndicators(overview);
-  const channelCards = buildChannelOverviewCards(overview);
+  const [overview, engagement] = await Promise.all([
+    fetchJson(`/api/overview${overviewQueryString()}`),
+    fetchJson(`/api/engagement${overviewQueryString()}`)
+  ]);
 
   root.innerHTML = `
     <section class="activity-summary-card">
@@ -108,35 +107,16 @@ async function renderOverview() {
       </div>
     </section>
 
-    <section>
-      <div class="section-row">
-        <h3 class="section-title">Channel Performance Overview</h3>
-        <span class="section-note">Relative performance and growth by channel</span>
-      </div>
-      <div class="channel-overview-grid">
-        ${channelCards.map(renderChannelOverviewCard).join("")}
-      </div>
-    </section>
-
-    <section class="growth-trend-row">
-      <div class="band">
-        <div class="section-row">
-          <h3 class="section-title">Growth Indicators</h3>
-          <span class="section-note">${formatNumber(growthCards.length)} priority metrics</span>
-        </div>
-        <div class="growth-card-grid">
-          ${growthCards.map(renderMetricCard).join("") || emptyCard("No data available")}
+    <section class="activity-summary-card">
+      <div class="activity-summary-header">
+        <div>
+          <p class="eyebrow">Current Period</p>
+          <h3 class="section-title">Communications engagement</h3>
         </div>
       </div>
-      <div class="band">
-        <h3 class="section-title">Trend Chart</h3>
-        ${renderLineChart(series, "Airtable performance trend")}
+      <div class="engagement-card-grid">
+        ${renderEngagementCards(engagement.engagementCards ?? [])}
       </div>
-    </section>
-
-    <section class="band">
-      <h3 class="section-title">Monthly Snapshot</h3>
-      ${renderMonthlySnapshotTable(overview.monthlySnapshot)}
     </section>
   `;
 
@@ -286,7 +266,6 @@ function renderActivitySummaryItems(summary = {}) {
     ["Emails Sent", authoritativeItems.emailsSent],
     ["Podcasts Published", authoritativeItems.podcastsPublished],
     ["Social Posts Published", authoritativeItems.socialPostsPublished],
-    ["Website Active Users", authoritativeItems.uniqueWebsiteVisitors],
     ["Email Campaigns Sent", authoritativeItems.emailCampaignsSent]
   ];
 
@@ -297,6 +276,48 @@ function renderActivitySummaryItems(summary = {}) {
     </article>
   `).join("");
 }
+
+function renderEngagementCards(cards = []) {
+  if (!cards.length) {
+    return `<div class="empty-state">No engagement data available</div>`;
+  }
+
+  return cards.map(renderEngagementCard).join("");
+}
+
+function renderEngagementCard(card = {}) {
+  const hasData = card.hasData ?? false;
+  const hasComparison = card.hasComparison ?? false;
+  const changePercent = Number(card.changePercent ?? 0);
+  const direction = changePercent < 0 ? "down" : "up";
+  const arrow = changePercent < 0 ? "↓" : "↑";
+
+  if (!hasData) {
+    return `
+      <article class="engagement-card no-data">
+        <div class="engagement-label">${escapeHtml(card.label)}</div>
+        <div class="engagement-value"><strong>No data</strong></div>
+        <div class="engagement-comparison unavailable">No data available</div>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="engagement-card">
+      <div class="engagement-label">${escapeHtml(card.label)}</div>
+      <div class="engagement-value">
+        <strong>${formatNumber(card.currentValue)}</strong>
+      </div>
+      ${hasComparison
+        ? `<div class="engagement-comparison ${direction}">
+            ${arrow} ${formatPercent(Math.abs(changePercent))} vs previous period
+          </div>`
+        : `<div class="engagement-comparison unavailable">No comparison available</div>`
+      }
+    </article>
+  `;
+}
+
 
 function renderOverviewDateSelector() {
   const range = currentOverviewDateRange();

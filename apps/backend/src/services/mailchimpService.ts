@@ -526,6 +526,8 @@ function toKpiHistoryRows(metrics: MailchimpPeriodMetrics): AirtableFields[] {
 
   return [
     kpiRow(common, "emails_sent", "Emails Sent", metrics.emailsSent, "count", "Sum"),
+    kpiRow(common, "email_opens", "Email Opens", metrics.uniqueOpens, "count", "Sum"),
+    kpiRow(common, "email_clicks", "Email Clicks", metrics.uniqueClicks, "count", "Sum"),
     kpiRow(common, "email_open_rate", "Email Open Rate", metrics.openRate, "percent", "Weighted Average", {
       Numerator: metrics.uniqueOpens,
       Denominator: metrics.emailsSent
