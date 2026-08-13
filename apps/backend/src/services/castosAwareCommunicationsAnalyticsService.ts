@@ -27,8 +27,8 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
     replaceEmailChannel(channels, kpiHistory, dateRange, previousDateRange);
     replaceYouTubeChannel(channels, kpiHistory, dateRange, previousDateRange);
     replaceGa4Channel(channels, kpiHistory, "website", "Website", "ga4_website_sessions", "ga4_website_page_views", dateRange, previousDateRange);
-    replaceGa4Channel(channels, kpiHistory, "voiceOfElim", "Voice of Elim", "ga4_voice_of_elim_sessions", "ga4_voice_of_elim_page_views", dateRange, previousDateRange);
-    replaceGa4Channel(channels, kpiHistory, "elimUpdates", "Elim Updates", "ga4_elim_updates_sessions", "ga4_elim_updates_page_views", dateRange, previousDateRange);
+    replaceGa4Channel(channels, kpiHistory, "voiceOfElim", "Voice of Elim", "ga4_voice_of_elim_publications", "ga4_voice_of_elim_page_views", dateRange, previousDateRange);
+    replaceGa4Channel(channels, kpiHistory, "elimUpdates", "Elim Updates", "ga4_elim_updates_publications", "ga4_elim_updates_page_views", dateRange, previousDateRange);
 
     const comparable = channels.filter((channel) => channel.hasData && channel.metricAvailable !== false);
     const currentTotal = comparable.reduce((sum, channel) => sum + finiteNumber(channel.metricValue), 0);
@@ -76,17 +76,17 @@ function replaceYouTubeChannel(channels: ChannelLike[], kpiHistory: Array<Normal
   channels[index] = { ...prior, activityVolume: videoCount, metricLabel: "Views", metricValue: views, previousMetricValue: previousViewCount, changePercent: calculatePercentChange(views, previousViewCount), source: "KPI_History / YouTube", hasData: videoCount > 0 || views > 0, metricAvailable: true };
 }
 
-function replaceGa4Channel(channels: ChannelLike[], kpiHistory: Array<NormalizedAirtableRecord<Fields>>, channelKey: string, label: string, sessionsKey: string, viewsKey: string, currentRange: DateRangeLike, previousRange: DateRangeLike): void {
+function replaceGa4Channel(channels: ChannelLike[], kpiHistory: Array<NormalizedAirtableRecord<Fields>>, channelKey: string, label: string, activityKey: string, viewsKey: string, currentRange: DateRangeLike, previousRange: DateRangeLike): void {
   const index = channels.findIndex((channel) => channel.key === channelKey); if (index < 0) return;
-  const currentSessions = findSourceMetric(kpiHistory, "google analytics 4", sessionsKey, currentRange);
+  const currentActivity = findSourceMetric(kpiHistory, "google analytics 4", activityKey, currentRange);
   const currentViews = findSourceMetric(kpiHistory, "google analytics 4", viewsKey, currentRange);
   const previousViews = findSourceMetric(kpiHistory, "google analytics 4", viewsKey, previousRange);
-  if (!currentSessions && !currentViews) return;
+  if (!currentActivity && !currentViews) return;
   const prior = channels[index];
-  const sessions = currentSessions ? numberField(currentSessions.fields, ["Value"]) : finiteNumber(prior.activityVolume);
+  const activity = currentActivity ? numberField(currentActivity.fields, ["Value"]) : finiteNumber(prior.activityVolume);
   const views = currentViews ? numberField(currentViews.fields, ["Value"]) : finiteNumber(prior.metricValue);
   const previous = previousViews ? numberField(previousViews.fields, ["Value"]) : finiteNumber(prior.previousMetricValue);
-  channels[index] = { ...prior, label, activityVolume: sessions, metricLabel: "Page Views", metricValue: views, previousMetricValue: previous, changePercent: calculatePercentChange(views, previous), source: "KPI_History / Google Analytics 4", hasData: sessions > 0 || views > 0, metricAvailable: true };
+  channels[index] = { ...prior, label, activityVolume: activity, metricLabel: "Page Views", metricValue: views, previousMetricValue: previous, changePercent: calculatePercentChange(views, previous), source: "KPI_History / Google Analytics 4", hasData: activity > 0 || views > 0, metricAvailable: true };
 }
 
 function findSourceMetric(records: Array<NormalizedAirtableRecord<Fields>>, sourceTerm: string, metricKey: string, range: DateRangeLike): NormalizedAirtableRecord<Fields> | undefined {
