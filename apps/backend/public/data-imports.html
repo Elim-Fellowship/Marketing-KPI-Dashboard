@@ -5,18 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Data Imports | Communications Intelligence</title>
     <link rel="stylesheet" href="/styles.css">
-    <link rel="stylesheet" href="/data-imports.css">
+    <style>
+      .imports-page{display:grid;gap:24px}.import-card{display:grid;gap:22px}.import-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.import-step{display:flex;gap:12px;padding:14px;border:1px solid rgba(148,163,184,.18);border-radius:12px}.import-step p{margin:4px 0 0;color:#94a3b8}.step-number{display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;border-radius:50%;background:rgba(59,130,246,.18);color:#93c5fd}.drop-zone{display:grid;place-items:center;text-align:center;gap:7px;min-height:190px;border:2px dashed rgba(96,165,250,.45);border-radius:16px;cursor:pointer;padding:28px}.drop-zone:hover,.drop-zone.dragging{border-color:#60a5fa}.drop-title{font-size:20px;font-weight:700}.drop-copy,.selected-file{color:#94a3b8}.import-controls{display:flex;gap:18px;align-items:flex-end;justify-content:space-between}.access-key-field{display:grid;gap:7px;min-width:min(430px,100%)}.access-key-field input{border:1px solid rgba(148,163,184,.3);border-radius:10px;background:rgba(15,23,42,.65);color:#e2e8f0;padding:11px 12px}.access-key-field span{font-size:12px;color:#64748b}.primary-action,.secondary-action{border:0;border-radius:10px;padding:11px 16px;font-weight:700;cursor:pointer}.primary-action{background:#2563eb;color:#fff}.primary-action:disabled{opacity:.45}.secondary-action{background:rgba(51,65,85,.65);color:#e2e8f0}.import-result{border-radius:12px;padding:16px}.import-result.success{border:1px solid rgba(52,211,153,.3)}.import-result.error{border:1px solid rgba(248,113,113,.28)}.result-metrics{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.history-table{width:100%;border-collapse:collapse}.history-table th,.history-table td{text-align:left;padding:12px;border-bottom:1px solid rgba(148,163,184,.14)}.nav-tabs a.nav-tab{text-decoration:none;display:block}.source-chip{font-size:12px;color:#94a3b8}@media(max-width:900px){.import-steps{grid-template-columns:1fr}.import-controls{flex-direction:column;align-items:stretch}.access-key-field{min-width:0}}
+    </style>
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand-block">
-          <div class="brand-mark">CI</div>
-          <div>
-            <h1>Communications Intelligence</h1>
-            <p>Airtable-powered analytics</p>
-          </div>
-        </div>
+        <div class="brand-block"><div class="brand-mark">CI</div><div><h1>Communications Intelligence</h1><p>Airtable-powered analytics</p></div></div>
         <nav class="nav-tabs" aria-label="Primary pages">
           <a class="nav-tab" href="/">KPI Overview</a>
           <a class="nav-tab" href="/top-performing-content">Top Performing Content</a>
@@ -24,70 +20,21 @@
           <a class="nav-tab active" href="/data-imports.html" aria-current="page">Data Imports</a>
         </nav>
       </aside>
-
       <main class="main-panel">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">Operational Data Intake</p>
-            <h2>Data Imports</h2>
-          </div>
-          <div class="status-pill" id="import-status">Ready</div>
-        </header>
-
+        <header class="topbar"><div><p class="eyebrow">Operational Data Intake</p><h2>Data Imports</h2></div><div class="status-pill" id="import-status">Ready</div></header>
         <section class="page-root imports-page">
           <section class="band import-card">
-            <div class="section-row import-heading">
-              <div>
-                <p class="eyebrow">Spotify Podcast Analytics</p>
-                <h3 class="section-title">Upload Spotify analytics CSV</h3>
-                <p class="section-note">Upload the CSV exactly as exported. The backend validates, normalizes, checks duplicates, and updates Airtable automatically.</p>
-              </div>
-              <span class="source-chip">Spotify_Episode_Metrics</span>
-            </div>
-
+            <div class="section-row"><div><p class="eyebrow">Spotify Podcast Analytics</p><h3 class="section-title">Upload Spotify analytics CSV</h3><p class="section-note">Upload the CSV exactly as exported. The backend validates, normalizes, checks duplicates, and updates Airtable automatically.</p></div><span class="source-chip">Spotify_Episode_Metrics</span></div>
             <div class="import-steps">
-              <div class="import-step">
-                <span class="step-number">1</span>
-                <div><strong>Export from Spotify</strong><p>Download the analytics CSV from Spotify for Creators. Do not edit the file.</p></div>
-              </div>
-              <div class="import-step">
-                <span class="step-number">2</span>
-                <div><strong>Choose the file</strong><p>Drag the CSV below or browse to select it.</p></div>
-              </div>
-              <div class="import-step">
-                <span class="step-number">3</span>
-                <div><strong>Import</strong><p>Existing episodes are updated, unchanged rows are skipped, and new episodes are created.</p></div>
-              </div>
+              <div class="import-step"><span class="step-number">1</span><div><strong>Export from Spotify</strong><p>Download the analytics CSV from Spotify for Creators. Do not edit the file.</p></div></div>
+              <div class="import-step"><span class="step-number">2</span><div><strong>Choose the file</strong><p>Drag the CSV below or browse to select it.</p></div></div>
+              <div class="import-step"><span class="step-number">3</span><div><strong>Import</strong><p>Existing episodes are updated, unchanged rows are skipped, and new episodes are created.</p></div></div>
             </div>
-
-            <label class="drop-zone" id="drop-zone" for="spotify-file">
-              <input id="spotify-file" type="file" accept=".csv,text/csv" hidden>
-              <span class="drop-title">Drop Spotify CSV here</span>
-              <span class="drop-copy">or click to browse</span>
-              <span class="selected-file" id="selected-file">No file selected</span>
-            </label>
-
-            <div class="import-controls">
-              <label class="access-key-field">Import access key
-                <input id="import-key" type="password" autocomplete="off" placeholder="Enter staff import key">
-                <span>The key is kept only for this browser session.</span>
-              </label>
-              <button id="import-button" class="primary-action" type="button" disabled>Import Spotify Data</button>
-            </div>
-
+            <label class="drop-zone" id="drop-zone" for="spotify-file"><input id="spotify-file" type="file" accept=".csv,text/csv" hidden><span class="drop-title">Drop Spotify CSV here</span><span class="drop-copy">or click to browse</span><span class="selected-file" id="selected-file">No file selected</span></label>
+            <div class="import-controls"><label class="access-key-field">Import access key<input id="import-key" type="password" autocomplete="off" placeholder="Enter staff import key"><span>The key is kept only for this browser session.</span></label><button id="import-button" class="primary-action" type="button" disabled>Import Spotify Data</button></div>
             <div id="import-result" class="import-result" hidden></div>
           </section>
-
-          <section class="band">
-            <div class="section-row">
-              <div>
-                <p class="eyebrow">This server session</p>
-                <h3 class="section-title">Recent Spotify imports</h3>
-              </div>
-              <button id="refresh-history" class="secondary-action" type="button">Refresh</button>
-            </div>
-            <div id="import-history" class="import-history"><div class="empty-state">Loading import history...</div></div>
-          </section>
+          <section class="band"><div class="section-row"><div><p class="eyebrow">This server session</p><h3 class="section-title">Recent Spotify imports</h3></div><button id="refresh-history" class="secondary-action" type="button">Refresh</button></div><div id="import-history"><div class="empty-state">Loading import history...</div></div></section>
         </section>
       </main>
     </div>
