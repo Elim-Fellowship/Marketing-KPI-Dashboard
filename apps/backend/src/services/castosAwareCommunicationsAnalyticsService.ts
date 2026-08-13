@@ -13,16 +13,20 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
 
   override async getChannelBreakdown(query: { startDate?: string; endDate?: string; dateMode?: string } = {}): Promise<Record<string, unknown>> {
     const base = await super.getChannelBreakdown(query) as Record<string, any>;
-    const [contentPerformance, kpiHistory] = await Promise.all([
+    const [contentPerformance, kpiHistory, spotifyEpisodes] = await Promise.all([
       this.liveAirtable.getRecords("contentPerformance", { maxRecords: 1000 }),
-      this.liveAirtable.getRecords("kpiHistory", { maxRecords: 1000 })
+      this.liveAirtable.getRecords("kpiHistory", { maxRecords: 1000 }),
+      this.liveAirtable.getRecords("spotifyEpisodeMetrics", { maxRecords: 1000 })
     ]);
     const dateRange = (base.dateRange ?? {}) as DateRangeLike;
     const previousDateRange = (base.previousDateRange ?? {}) as DateRangeLike;
     const currentCastos = filterCastosEpisodes(contentPerformance, dateRange);
     const previousCastos = filterCastosEpisodes(contentPerformance, previousDateRange);
+    const currentSpotify = filterSpotifyEpisodes(spotifyEpisodes, dateRange);
+    const previousSpotify = filterSpotifyEpisodes(spotifyEpisodes, previousDateRange);
     const channels = Array.isArray(base.channels) ? [...base.channels] as ChannelLike[] : [];
 
+    replaceSpotifyChannel(channels, currentSpotify, previousSpotify);
     replaceCastosChannel(channels, currentCastos, previousCastos);
     replaceEmailChannel(channels, kpiHistory, dateRange, previousDateRange);
     replaceYouTubeChannel(channels, kpiHistory, dateRange, previousDateRange);
@@ -37,10 +41,47 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
       ...base,
       channels,
       summary: { ...(base.summary ?? {}), currentValue: currentTotal, previousValue: previousTotal, changePercent: comparable.length ? calculatePercentChange(currentTotal, previousTotal) : undefined, channelCount: comparable.length },
+      spotifyDataState: { source: "Spotify_Episode_Metrics", currentEpisodesPublished: currentSpotify.length, previousEpisodesPublished: previousSpotify.length },
       castosDataState: { activitySource: "Content_Performance", currentEpisodesPublished: currentCastos.length, previousEpisodesPublished: previousCastos.length, audienceMetricAvailable: false },
       trends: { ...(base.trends ?? {}), channels: channels.map((channel) => ({ key: channel.key, label: channel.label, color: channel.color, metricLabel: channel.metricLabel, series: channel.series ?? [] })) }
     };
   }
+}
+
+function replaceSpotifyChannel(channels: ChannelLike[], currentSpotify: Array<NormalizedAirtableRecord<Fields>>, previousSpotify: Array<NormalizedAirtableRecord<Fields>>): void {
+  const index = channels.findIndex((channel) => channel.key === "spotify");
+  const prior = index >= 0 ? channels[index] : undefined;
+  const currentStreams = sumSpotifyStreams(currentSpotify);
+  const previousStreams = sumSpotifyStreams(previousSpotify);
+  const channel: ChannelLike = {
+    key: "spotify",
+    label: prior?.label ?? "Spotify",
+    metricLabel: "Streams",
+    color: prior?.color ?? "#1DB954",
+    activityVolume: currentSpotify.length,
+    metricValue: currentStreams,
+    previousMetricValue: previousStreams,
+    changePercent: previousStreams > 0 ? calculatePercentChange(currentStreams, previousStreams) : undefined,
+    source: "Spotify_Episode_Metrics",
+    hasData: currentSpotify.length > 0,
+    metricAvailable: true,
+    series: buildSpotifySeries(currentSpotify)
+  };
+  if (index >= 0) channels[index] = channel; else channels.push(channel);
+}
+
+function sumSpotifyStreams(records: Array<NormalizedAirtableRecord<Fields>>): number {
+  return records.reduce((sum, record) => sum + numberField(record.fields, ["Total Streams", "Streams", "Plays", "Value"]), 0);
+}
+
+function buildSpotifySeries(records: Array<NormalizedAirtableRecord<Fields>>): Array<{ date: string; value: number }> {
+  const points = new Map<string, number>();
+  for (const record of records) {
+    const date = dateField(record.fields, ["Publish Date", "Reporting Week", "Reporting Month", "Date", "Week", "Snapshot Date"]);
+    if (!date) continue;
+    points.set(date, (points.get(date) ?? 0) + numberField(record.fields, ["Total Streams", "Streams", "Plays", "Value"]));
+  }
+  return [...points.entries()].map(([date, value]) => ({ date, value })).sort((left, right) => left.date.localeCompare(right.date));
 }
 
 function replaceCastosChannel(channels: ChannelLike[], currentCastos: Array<NormalizedAirtableRecord<Fields>>, previousCastos: Array<NormalizedAirtableRecord<Fields>>): void {
@@ -99,6 +140,14 @@ function findSourceMetric(records: Array<NormalizedAirtableRecord<Fields>>, sour
     return start === range.startDate && end === range.endDate;
   });
   return candidates.find((record) => stringField(record.fields, ["Period Type"], "").toLowerCase() === "monthly") ?? candidates[0];
+}
+
+function filterSpotifyEpisodes(records: Array<NormalizedAirtableRecord<Fields>>, range: DateRangeLike): Array<NormalizedAirtableRecord<Fields>> {
+  return records.filter((record) => {
+    if (!range.startDate || !range.endDate) return true;
+    const date = dateField(record.fields, ["Publish Date", "Reporting Week", "Reporting Month", "Date", "Week", "Snapshot Date"]);
+    return Boolean(date && date >= range.startDate && date <= range.endDate);
+  });
 }
 
 function filterCastosEpisodes(records: Array<NormalizedAirtableRecord<Fields>>, range: DateRangeLike): Array<NormalizedAirtableRecord<Fields>> {
