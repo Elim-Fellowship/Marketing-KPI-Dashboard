@@ -8,6 +8,7 @@ import { dateField, numberField, stringField, type Fields } from "./communicatio
 interface ChannelLike { key?: string; label?: string; metricLabel?: string; color?: string; activityVolume?: number; metricValue?: number; previousMetricValue?: number; changePercent?: number; source?: string; hasData?: boolean; metricAvailable?: boolean; metricNote?: string; series?: Array<{ date: string; value: number }>; }
 interface DateRangeLike { startDate?: string; endDate?: string; mode?: string; }
 interface ActivityItem { value: number; available: boolean; source: string; metricKey?: string; note?: string; }
+interface EngagementAggregate { value: number; available: boolean; }
 
 export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAnalyticsService {
   constructor(config: AppConfig, private readonly liveAirtable: AirtableService) { super(config, liveAirtable); }
@@ -22,7 +23,6 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
 
     const emailRecord = findSourceMetric(kpiHistory, "mailchimp", "emails_sent", dateRange);
     const campaignRecord = findSourceMetric(kpiHistory, "mailchimp", "campaigns_sent", dateRange);
-    const websiteUsersRecord = findSourceMetric(kpiHistory, "google analytics 4", "ga4_website_active_users", dateRange);
     const spotifyCoverage = filterSpotifyKpiRecords(kpiHistory, "spotify_episode_consumption_hours", dateRange);
     const spotifyPublished = spotifyCoverage.filter((record) => isSpotifyEpisodePublishedInRange(record, dateRange));
     const bufferSummary = summarizeBufferPublishedPosts(bufferPosts, dateRange);
@@ -42,21 +42,16 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
         source: "Buffer_Post_Metrics / Buffer",
         note: "Counts distinct Buffer post IDs published to a channel in the selected reporting range."
       },
-      uniqueWebsiteVisitors: activityItem(websiteUsersRecord, "KPI_History / Google Analytics 4", "ga4_website_active_users"),
       emailCampaignsSent: activityItem(campaignRecord, "KPI_History / Mailchimp", "campaigns_sent")
     };
 
     const hasData = Object.values(items).some((item) => item.available);
     const monthlyActivitySummary = {
-      ...(base.monthlyActivitySummary ?? {}),
       hasData,
       emailsSent: items.emailsSent.available ? items.emailsSent.value : 0,
       podcastsPublished: items.podcastsPublished.available ? items.podcastsPublished.value : 0,
       socialPostsPublished: items.socialPostsPublished.available ? items.socialPostsPublished.value : 0,
-      uniqueWebsiteVisitors: items.uniqueWebsiteVisitors.available ? items.uniqueWebsiteVisitors.value : 0,
       emailCampaignsSent: items.emailCampaignsSent.available ? items.emailCampaignsSent.value : 0,
-      websiteArticlesPublished: items.uniqueWebsiteVisitors.available ? items.uniqueWebsiteVisitors.value : 0,
-      newsletterEditionsPublished: items.emailCampaignsSent.available ? items.emailCampaignsSent.value : 0,
       items
     };
 
@@ -67,6 +62,42 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
         ...(base.rawCounts ?? {}),
         bufferPostMetrics: bufferPosts.length
       }
+    };
+  }
+
+  override async getEngagement(query: { startDate?: string; endDate?: string; dateMode?: string } = {}): Promise<Record<string, unknown>> {
+    const base = await super.getEngagement(query) as Record<string, any>;
+    const [kpiHistory, bufferMetrics] = await Promise.all([
+      this.liveAirtable.getRecords("kpiHistory", { maxRecords: 1000 }),
+      this.liveAirtable.getRecords("bufferPostMetrics", { maxRecords: 2000 })
+    ]);
+    const dateRange = (base.dateRange ?? {}) as DateRangeLike;
+    const previousDateRange = (base.previousDateRange ?? {}) as DateRangeLike;
+
+    const currentSocial = summarizeBufferEngagements(bufferMetrics, dateRange);
+    const previousSocial = summarizeBufferEngagements(bufferMetrics, previousDateRange);
+    const currentPodcast = aggregateMetricRecords(filterSpotifyKpiRecords(kpiHistory, "spotify_consumption_hours", dateRange));
+    const previousPodcast = aggregateMetricRecords(filterSpotifyKpiRecords(kpiHistory, "spotify_consumption_hours", previousDateRange));
+    const currentWebsite = activityAggregate(findSourceMetric(kpiHistory, "google analytics 4", "ga4_website_active_users", dateRange));
+    const previousWebsite = activityAggregate(findSourceMetric(kpiHistory, "google analytics 4", "ga4_website_active_users", previousDateRange));
+    const currentOpens = activityAggregate(findSourceMetric(kpiHistory, "mailchimp", "email_opens", dateRange));
+    const previousOpens = activityAggregate(findSourceMetric(kpiHistory, "mailchimp", "email_opens", previousDateRange));
+    const currentClicks = activityAggregate(findSourceMetric(kpiHistory, "mailchimp", "email_clicks", dateRange));
+    const previousClicks = activityAggregate(findSourceMetric(kpiHistory, "mailchimp", "email_clicks", previousDateRange));
+    const currentSubscribers = activityAggregate(findSourceMetric(kpiHistory, "mailchimp", "new_subscribers", dateRange));
+    const previousSubscribers = activityAggregate(findSourceMetric(kpiHistory, "mailchimp", "new_subscribers", previousDateRange));
+
+    return {
+      dateRange,
+      previousDateRange,
+      engagementCards: [
+        engagementCard("social_engagements", "Social Engagements", currentSocial, previousSocial),
+        engagementCard("podcast_listening_hours", "Podcast Listening Hours", currentPodcast, previousPodcast),
+        engagementCard("website_active_users", "Website Active Users", currentWebsite, previousWebsite),
+        engagementCard("email_opens", "Email Opens", currentOpens, previousOpens),
+        engagementCard("email_clicks", "Email Clicks", currentClicks, previousClicks),
+        engagementCard("new_email_subscribers", "New Email Subscribers", currentSubscribers, previousSubscribers)
+      ]
     };
   }
 
@@ -125,6 +156,46 @@ function activityItem(record: NormalizedAirtableRecord<Fields> | undefined, sour
     source,
     metricKey
   };
+}
+
+function activityAggregate(record: NormalizedAirtableRecord<Fields> | undefined): EngagementAggregate {
+  return { value: record ? numberField(record.fields, ["Value"]) : 0, available: Boolean(record) };
+}
+
+function aggregateMetricRecords(records: Array<NormalizedAirtableRecord<Fields>>): EngagementAggregate {
+  return {
+    value: records.reduce((sum, record) => sum + numberField(record.fields, ["Value"]), 0),
+    available: records.length > 0
+  };
+}
+
+function engagementCard(id: string, label: string, current: EngagementAggregate, previous: EngagementAggregate): Record<string, unknown> {
+  const hasComparison = current.available && previous.available;
+  return {
+    id,
+    label,
+    currentValue: current.available ? current.value : 0,
+    currentLabel: label,
+    previousValue: hasComparison ? previous.value : undefined,
+    changePercent: hasComparison ? calculatePercentChange(current.value, previous.value) : undefined,
+    hasComparison,
+    hasData: current.available
+  };
+}
+
+function summarizeBufferEngagements(records: Array<NormalizedAirtableRecord<Fields>>, range: DateRangeLike): EngagementAggregate {
+  if (!range.startDate || !range.endDate) return { value: 0, available: false };
+  let total = 0;
+  let available = false;
+  for (const record of records) {
+    const date = dateField(record.fields, ["Metric Date", "Date"]);
+    if (!date || date < range.startDate || date > range.endDate) continue;
+    const metricName = stringField(record.fields, ["Metric Name", "Metric", "Type"], "").toLowerCase();
+    if (!metricName.includes("reaction") && !metricName.includes("comment") && !metricName.includes("share")) continue;
+    available = true;
+    total += numberField(record.fields, ["Metric Value", "Value", "Count"]);
+  }
+  return { value: total, available };
 }
 
 function isSpotifyEpisodePublishedInRange(record: NormalizedAirtableRecord<Fields>, range: DateRangeLike): boolean {
