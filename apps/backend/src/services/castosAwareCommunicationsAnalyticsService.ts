@@ -7,9 +7,68 @@ import { dateField, numberField, stringField, type Fields } from "./communicatio
 
 interface ChannelLike { key?: string; label?: string; metricLabel?: string; color?: string; activityVolume?: number; metricValue?: number; previousMetricValue?: number; changePercent?: number; source?: string; hasData?: boolean; metricAvailable?: boolean; metricNote?: string; series?: Array<{ date: string; value: number }>; }
 interface DateRangeLike { startDate?: string; endDate?: string; mode?: string; }
+interface ActivityItem { value: number; available: boolean; source: string; metricKey?: string; note?: string; }
 
 export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAnalyticsService {
   constructor(config: AppConfig, private readonly liveAirtable: AirtableService) { super(config, liveAirtable); }
+
+  override async getOverview(query: { startDate?: string; endDate?: string; dateMode?: string } = {}): Promise<Record<string, unknown>> {
+    const base = await super.getOverview(query) as Record<string, any>;
+    const [kpiHistory, bufferPosts] = await Promise.all([
+      this.liveAirtable.getRecords("kpiHistory", { maxRecords: 1000 }),
+      this.liveAirtable.getRecords("bufferPostMetrics", { maxRecords: 2000 })
+    ]);
+    const dateRange = (base.dateRange ?? {}) as DateRangeLike;
+
+    const emailRecord = findSourceMetric(kpiHistory, "mailchimp", "emails_sent", dateRange);
+    const campaignRecord = findSourceMetric(kpiHistory, "mailchimp", "campaigns_sent", dateRange);
+    const websiteUsersRecord = findSourceMetric(kpiHistory, "google analytics 4", "ga4_website_active_users", dateRange);
+    const spotifyCoverage = filterSpotifyKpiRecords(kpiHistory, "spotify_episode_consumption_hours", dateRange);
+    const spotifyPublished = spotifyCoverage.filter((record) => isSpotifyEpisodePublishedInRange(record, dateRange));
+    const bufferSummary = summarizeBufferPublishedPosts(bufferPosts, dateRange);
+
+    const items: Record<string, ActivityItem> = {
+      emailsSent: activityItem(emailRecord, "KPI_History / Mailchimp", "emails_sent"),
+      podcastsPublished: {
+        value: spotifyPublished.length,
+        available: spotifyCoverage.length > 0,
+        source: "KPI_History / Spotify",
+        metricKey: "spotify_episode_consumption_hours",
+        note: "Counts Spotify episodes whose encoded publish date falls inside the selected reporting range."
+      },
+      socialPostsPublished: {
+        value: bufferSummary.count,
+        available: bufferSummary.available,
+        source: "Buffer_Post_Metrics / Buffer",
+        note: "Counts distinct Buffer post IDs published to a channel in the selected reporting range."
+      },
+      uniqueWebsiteVisitors: activityItem(websiteUsersRecord, "KPI_History / Google Analytics 4", "ga4_website_active_users"),
+      emailCampaignsSent: activityItem(campaignRecord, "KPI_History / Mailchimp", "campaigns_sent")
+    };
+
+    const hasData = Object.values(items).some((item) => item.available);
+    const monthlyActivitySummary = {
+      ...(base.monthlyActivitySummary ?? {}),
+      hasData,
+      emailsSent: items.emailsSent.available ? items.emailsSent.value : 0,
+      podcastsPublished: items.podcastsPublished.available ? items.podcastsPublished.value : 0,
+      socialPostsPublished: items.socialPostsPublished.available ? items.socialPostsPublished.value : 0,
+      uniqueWebsiteVisitors: items.uniqueWebsiteVisitors.available ? items.uniqueWebsiteVisitors.value : 0,
+      emailCampaignsSent: items.emailCampaignsSent.available ? items.emailCampaignsSent.value : 0,
+      websiteArticlesPublished: items.uniqueWebsiteVisitors.available ? items.uniqueWebsiteVisitors.value : 0,
+      newsletterEditionsPublished: items.emailCampaignsSent.available ? items.emailCampaignsSent.value : 0,
+      items
+    };
+
+    return {
+      ...base,
+      monthlyActivitySummary,
+      rawCounts: {
+        ...(base.rawCounts ?? {}),
+        bufferPostMetrics: bufferPosts.length
+      }
+    };
+  }
 
   override async getChannelBreakdown(query: { startDate?: string; endDate?: string; dateMode?: string } = {}): Promise<Record<string, unknown>> {
     const base = await super.getChannelBreakdown(query) as Record<string, any>;
@@ -57,6 +116,59 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
       trends: { ...(base.trends ?? {}), channels: channels.map((channel) => ({ key: channel.key, label: channel.label, color: channel.color, metricLabel: channel.metricLabel, series: channel.series ?? [] })) }
     };
   }
+}
+
+function activityItem(record: NormalizedAirtableRecord<Fields> | undefined, source: string, metricKey: string): ActivityItem {
+  return {
+    value: record ? numberField(record.fields, ["Value"]) : 0,
+    available: Boolean(record),
+    source,
+    metricKey
+  };
+}
+
+function isSpotifyEpisodePublishedInRange(record: NormalizedAirtableRecord<Fields>, range: DateRangeLike): boolean {
+  if (!range.startDate || !range.endDate) return false;
+  const explicitDate = dateField(record.fields, ["Publish Date"]);
+  const sourceRecordId = stringField(record.fields, ["Source Record ID"], "");
+  const encodedDate = /\|published:(\d{4}-\d{2}-\d{2})$/i.exec(sourceRecordId)?.[1];
+  const publishDate = explicitDate || encodedDate || "";
+  return Boolean(publishDate && publishDate >= range.startDate && publishDate <= range.endDate);
+}
+
+function summarizeBufferPublishedPosts(records: Array<NormalizedAirtableRecord<Fields>>, range: DateRangeLike): { count: number; available: boolean } {
+  if (!records.length || !range.startDate || !range.endDate) return { count: 0, available: false };
+  const dated = records
+    .map((record) => ({ record, date: dateField(record.fields, ["Metric Date", "Published At", "Publish Date", "Date", "Sent At"]) }))
+    .filter((entry) => Boolean(entry.date));
+  if (!dated.length) return { count: 0, available: false };
+
+  const earliestDate = dated.reduce((earliest, entry) => !earliest || entry.date < earliest ? entry.date : earliest, "");
+  const available = range.endDate >= earliestDate;
+  const postIds = new Set<string>();
+  for (const entry of dated) {
+    if (entry.date < range.startDate || entry.date > range.endDate) continue;
+    const sourceId = bufferOriginalSourceRecordId(entry.record.fields);
+    if (sourceId) postIds.add(sourceId);
+  }
+  return { count: postIds.size, available };
+}
+
+function bufferOriginalSourceRecordId(fields: Fields): string {
+  const dimensionsRaw = stringField(fields, ["Dimensions"], "");
+  if (dimensionsRaw) {
+    try {
+      const dimensions = JSON.parse(dimensionsRaw) as { sourceRecordId?: unknown };
+      const sourceRecordId = String(dimensions.sourceRecordId ?? "").trim();
+      if (sourceRecordId) return sourceRecordId;
+    } catch { /* fall through */ }
+  }
+  const metricRowId = stringField(fields, ["Source Record ID"], "");
+  const metricName = stringField(fields, ["Metric Name"], "");
+  const metricDate = stringField(fields, ["Metric Date"], "");
+  const suffix = [metricName, metricDate].filter(Boolean).join(":").toLowerCase().replace(/\s+/g, "-");
+  if (suffix && metricRowId.toLowerCase().endsWith(`:${suffix}`)) return metricRowId.slice(0, -(suffix.length + 1));
+  return metricRowId;
 }
 
 function replaceSpotifyConsumptionChannel(channels: ChannelLike[], currentRecords: Array<NormalizedAirtableRecord<Fields>>, previousRecords: Array<NormalizedAirtableRecord<Fields>>, currentTopEpisodes: Array<NormalizedAirtableRecord<Fields>>): void {
