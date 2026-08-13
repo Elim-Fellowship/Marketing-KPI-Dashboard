@@ -367,6 +367,51 @@ export class CommunicationsAnalyticsService {
       }))
     };
   }
+
+  async getEngagement(query: {
+    startDate?: string;
+    endDate?: string;
+    dateMode?: string;
+  } = {}): Promise<Record<string, unknown>> {
+    const [kpiHistory, bufferPostMetrics] = await Promise.all([
+      this.airtable.getRecords("kpiHistory", {
+        maxRecords: 500
+      }),
+      this.airtable.getRecords("bufferPostMetrics", {
+        maxRecords: 1000
+      })
+    ]);
+
+    const dateRange = normalizeDateRange(query.startDate, query.endDate, query.dateMode);
+    const previousDateRange = previousEquivalentDateRange(dateRange);
+
+    const filteredKpiHistory = filterRecordsByDate(kpiHistory, KPI_HISTORY_DATE_FIELDS, dateRange);
+    const previousKpiHistory = filterRecordsByDate(
+      kpiHistory,
+      KPI_HISTORY_DATE_FIELDS,
+      previousDateRange
+    );
+
+    const filteredBuffer = filterRecordsByDate(bufferPostMetrics, ["Metric Date", "Date"], dateRange);
+    const previousBuffer = filterRecordsByDate(
+      bufferPostMetrics,
+      ["Metric Date", "Date"],
+      previousDateRange
+    );
+
+    const engagementCards = buildEngagementCards(
+      filteredKpiHistory,
+      previousKpiHistory,
+      filteredBuffer,
+      previousBuffer
+    );
+
+    return {
+      dateRange,
+      previousDateRange,
+      engagementCards
+    };
+  }
 }
 
 const KPI_HISTORY_DATE_FIELDS = ["Date", "Reporting Date", "Period", "Month", "Week"];
@@ -1197,6 +1242,169 @@ function toIsoDate(date: Date): string {
 
 function roundOne(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+function buildEngagementCards(
+  currentKpiHistory: Array<NormalizedAirtableRecord<Fields>>,
+  previousKpiHistory: Array<NormalizedAirtableRecord<Fields>>,
+  currentBuffer: Array<NormalizedAirtableRecord<Fields>>,
+  previousBuffer: Array<NormalizedAirtableRecord<Fields>>
+): Array<{
+  id: string;
+  label: string;
+  currentValue: number;
+  currentLabel: string;
+  previousValue?: number;
+  changePercent?: number;
+  hasComparison: boolean;
+  hasData: boolean;
+}> {
+  const cards = [];
+
+  // Social Engagements = Buffer Reactions + Comments + Shares
+  const currentSocialResult = calculateBufferEngagements(currentBuffer);
+  const previousSocialResult = calculateBufferEngagements(previousBuffer);
+  cards.push(buildEngagementCard(
+    "social_engagements",
+    "Social Engagements",
+    currentSocialResult.value,
+    currentSocialResult.hasData,
+    previousSocialResult.value,
+    previousSocialResult.hasData
+  ));
+
+  // Podcast Listening Hours = sum of Spotify consumption_hours from KPI_History only
+  const currentPodcastResult = sumKpiByMetricKey(currentKpiHistory, "spotify_consumption_hours");
+  const previousPodcastResult = sumKpiByMetricKey(previousKpiHistory, "spotify_consumption_hours");
+  cards.push(buildEngagementCard(
+    "podcast_listening_hours",
+    "Podcast Listening Hours",
+    currentPodcastResult.value,
+    currentPodcastResult.hasData,
+    previousPodcastResult.value,
+    previousPodcastResult.hasData
+  ));
+
+  // Website Active Users - from GA4 normalized KPI records
+  const currentWebsiteResult = sumKpiByMetricKey(currentKpiHistory, "ga4_website_active_users");
+  const previousWebsiteResult = sumKpiByMetricKey(previousKpiHistory, "ga4_website_active_users");
+  cards.push(buildEngagementCard(
+    "website_active_users",
+    "Website Active Users",
+    currentWebsiteResult.value,
+    currentWebsiteResult.hasData,
+    previousWebsiteResult.value,
+    previousWebsiteResult.hasData
+  ));
+
+  // Email Opens - from normalized KPI records
+  const currentOpenResult = sumKpiByMetricKey(currentKpiHistory, "email_opens");
+  const previousOpenResult = sumKpiByMetricKey(previousKpiHistory, "email_opens");
+  cards.push(buildEngagementCard(
+    "email_opens",
+    "Email Opens",
+    currentOpenResult.value,
+    currentOpenResult.hasData,
+    previousOpenResult.value,
+    previousOpenResult.hasData
+  ));
+
+  // Email Clicks - from normalized KPI records
+  const currentClickResult = sumKpiByMetricKey(currentKpiHistory, "email_clicks");
+  const previousClickResult = sumKpiByMetricKey(previousKpiHistory, "email_clicks");
+  cards.push(buildEngagementCard(
+    "email_clicks",
+    "Email Clicks",
+    currentClickResult.value,
+    currentClickResult.hasData,
+    previousClickResult.value,
+    previousClickResult.hasData
+  ));
+
+  // New Email Subscribers - from normalized KPI records
+  const currentSubResult = sumKpiByMetricKey(currentKpiHistory, "new_subscribers");
+  const previousSubResult = sumKpiByMetricKey(previousKpiHistory, "new_subscribers");
+  cards.push(buildEngagementCard(
+    "new_email_subscribers",
+    "New Email Subscribers",
+    currentSubResult.value,
+    currentSubResult.hasData,
+    previousSubResult.value,
+    previousSubResult.hasData
+  ));
+
+  return cards;
+}
+
+function buildEngagementCard(
+  id: string,
+  label: string,
+  currentValue: number,
+  currentHasData: boolean,
+  previousValue?: number,
+  previousHasData?: boolean
+): {
+  id: string;
+  label: string;
+  currentValue: number;
+  currentLabel: string;
+  previousValue?: number;
+  changePercent?: number;
+  hasComparison: boolean;
+  hasData: boolean;
+} {
+  // Only show comparison if both current and previous periods have data
+  const hasComparison = currentHasData && (previousHasData ?? false) && Number.isFinite(previousValue ?? 0);
+  
+  return {
+    id,
+    label,
+    currentValue: currentHasData ? roundOne(currentValue) : 0,
+    currentLabel: label,
+    previousValue: hasComparison ? roundOne(previousValue ?? 0) : undefined,
+    changePercent: hasComparison ? calculatePercentChange(currentValue, previousValue ?? 0) : undefined,
+    hasComparison,
+    hasData: currentHasData
+  };
+}
+
+function calculateBufferEngagements(bufferMetrics: Array<NormalizedAirtableRecord<Fields>>): { value: number; hasData: boolean } {
+  let total = 0;
+  let foundData = false;
+
+  for (const record of bufferMetrics) {
+    const metricName = stringField(record.fields, ["Metric Name", "Metric", "Type"], "").toLowerCase();
+    const value = numberField(record.fields, ["Metric Value", "Value", "Count"]);
+
+    if ((metricName.includes("reaction") || metricName.includes("comment") || metricName.includes("share")) && 
+        Number.isFinite(value)) {
+      foundData = true;
+      if (value > 0) {
+        total += value;
+      }
+    }
+  }
+
+  return { value: total, hasData: foundData };
+}
+
+
+
+function sumKpiByMetricKey(kpiHistory: Array<NormalizedAirtableRecord<Fields>>, metricKey: string): { value: number; hasData: boolean } {
+  let total = 0;
+  let foundData = false;
+
+  for (const record of kpiHistory) {
+    const recordMetricKey = stringField(record.fields, ["Metric Key", "KPI"], "").toLowerCase();
+    const value = numberField(record.fields, ["Value", "Metric Value"]);
+
+    if (recordMetricKey === metricKey.toLowerCase() && Number.isFinite(value) && value >= 0) {
+      foundData = true;
+      total += value;
+    }
+  }
+
+  return { value: total, hasData: foundData };
 }
 
 function buildOverviewTrendSeries(

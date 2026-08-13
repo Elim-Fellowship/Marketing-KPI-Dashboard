@@ -260,6 +260,65 @@ select {
   line-height: 1;
 }
 
+.engagement-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.engagement-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.engagement-card.no-data {
+  opacity: 0.6;
+  background: #f5f5f5;
+}
+
+.engagement-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.engagement-value {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.engagement-value strong {
+  display: block;
+  color: var(--ink);
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.engagement-comparison {
+  display: block;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.engagement-comparison.down {
+  color: var(--rose);
+}
+
+.engagement-comparison.unavailable {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .date-selector {
   position: relative;
   min-width: min(320px, 100%);
