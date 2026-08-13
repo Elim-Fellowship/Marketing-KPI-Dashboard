@@ -10,12 +10,12 @@ import type {
 } from "./types.js";
 
 interface ReportingPeriod { startDate: string; endDate: string; }
-interface ChannelDefinition { key: string; label: string; pick: (period: Awaited<ReturnType<Ga4Service["fetchPeriodMetrics"]>>) => Ga4ChannelMetrics; }
+interface PublicationEntry { path: string; publishedDate: string; }
+interface PublicationChannel { key: "voice_of_elim" | "elim_updates"; label: string; url: string; }
 
-const CHANNELS: ChannelDefinition[] = [
-  { key: "website", label: "Website", pick: (period) => period.website },
-  { key: "voice_of_elim", label: "Voice of Elim", pick: (period) => period.voiceOfElim },
-  { key: "elim_updates", label: "Elim Updates", pick: (period) => period.elimUpdates }
+const PUBLICATION_CHANNELS: PublicationChannel[] = [
+  { key: "voice_of_elim", label: "Voice of Elim", url: "https://elimfellowship.org/the-voice-of-elim" },
+  { key: "elim_updates", label: "Elim Updates", url: "https://elimfellowship.org/updates" }
 ];
 
 export class WebsiteConnector extends BaseConnector {
@@ -26,7 +26,7 @@ export class WebsiteConnector extends BaseConnector {
     category: "website",
     mode: "api",
     enabled: true,
-    description: "Imports live GA4 sessions, active users, and page views for the website, Voice of Elim, and Elim Updates."
+    description: "Imports website GA4 analytics and combines publication discovery from elimfellowship.org with exact-article GA4 readership for Voice of Elim and Elim Updates."
   };
 
   async authenticate(context: ConnectorRunContext): Promise<ConnectorAuthResult> {
@@ -44,47 +44,61 @@ export class WebsiteConnector extends BaseConnector {
   async fetchMetrics(context: ConnectorRunContext): Promise<RawConnectorMetric[]> {
     const service = new Ga4Service(context.config);
     const metrics: RawConnectorMetric[] = [];
+    const publicationIndexes = new Map<string, PublicationEntry[]>();
+
+    for (const channel of PUBLICATION_CHANNELS) {
+      const entries = await discoverPublications(channel.url);
+      publicationIndexes.set(channel.key, entries);
+      context.logger.info("Publication index discovered", {
+        channel: channel.label,
+        sourceUrl: channel.url,
+        publicationCount: entries.length,
+        newestPublication: entries[0] ?? null
+      });
+    }
 
     for (const period of buildRollingMonthlyPeriods(new Date())) {
       const result = await service.fetchPeriodMetrics(period.startDate, period.endDate);
-      for (const channel of CHANNELS) {
-        const values = channel.pick(result);
-        const definitions = [
-          { suffix: "sessions", name: `${channel.label} Sessions`, unit: "sessions", value: values.sessions },
-          { suffix: "active_users", name: `${channel.label} Active Users`, unit: "users", value: values.activeUsers },
-          { suffix: "page_views", name: `${channel.label} Page Views`, unit: "views", value: values.pageViews }
-        ];
-        for (const definition of definitions) {
-          metrics.push({
-            sourceRecordId: `ga4:${channel.key}:${definition.suffix}:${period.startDate}:${period.endDate}`,
-            metricName: definition.name,
-            value: definition.value,
-            unit: definition.unit,
-            date: period.startDate,
-            targetTableKey: "kpiHistory",
-            platform: "GA4",
-            channel: channel.label,
-            contentType: "Web Analytics",
-            activityVolume: definition.suffix === "sessions" ? values.sessions : undefined,
-            dimensions: {
-              metricKey: `ga4_${channel.key}_${definition.suffix}`,
-              periodStart: period.startDate,
-              periodEnd: period.endDate,
-              periodType: "Monthly",
-              aggregationMethod: "Sum",
-              propertyId: result.propertyId
-            }
-          });
-        }
+      pushMetricSet(metrics, {
+        channelKey: "website",
+        channelLabel: "Website",
+        values: result.website,
+        period,
+        propertyId: result.propertyId
+      });
+
+      for (const channel of PUBLICATION_CHANNELS) {
+        const entries = (publicationIndexes.get(channel.key) ?? []).filter(
+          (entry) => entry.publishedDate >= period.startDate && entry.publishedDate <= period.endDate
+        );
+        const uniquePaths = Array.from(new Set(entries.map((entry) => entry.path)));
+        const readership = await service.fetchMetricsForPaths(period.startDate, period.endDate, uniquePaths);
+        pushPublicationMetricSet(metrics, {
+          channelKey: channel.key,
+          channelLabel: channel.label,
+          publicationCount: uniquePaths.length,
+          values: readership,
+          period,
+          propertyId: result.propertyId,
+          paths: uniquePaths
+        });
+        context.logger.info("GA4 publication analytics loaded", {
+          channel: channel.label,
+          startDate: period.startDate,
+          endDate: period.endDate,
+          publications: uniquePaths.length,
+          articlePaths: uniquePaths,
+          sessions: readership.sessions,
+          pageViews: readership.pageViews
+        });
       }
-      context.logger.info("GA4 monthly analytics loaded", {
+
+      context.logger.info("GA4 website analytics loaded", {
         propertyId: result.propertyId,
         startDate: period.startDate,
         endDate: period.endDate,
         websiteSessions: result.website.sessions,
-        websitePageViews: result.website.pageViews,
-        voiceOfElimPageViews: result.voiceOfElim.pageViews,
-        elimUpdatesPageViews: result.elimUpdates.pageViews
+        websitePageViews: result.website.pageViews
       });
     }
     return metrics;
@@ -130,6 +144,116 @@ export class WebsiteConnector extends BaseConnector {
   protected async getMockMetrics(_context: ConnectorRunContext): Promise<RawConnectorMetric[]> {
     return [];
   }
+}
+
+function pushMetricSet(metrics: RawConnectorMetric[], input: {
+  channelKey: string;
+  channelLabel: string;
+  values: Ga4ChannelMetrics;
+  period: ReportingPeriod;
+  propertyId: string;
+}): void {
+  const definitions = [
+    { suffix: "sessions", name: `${input.channelLabel} Sessions`, unit: "sessions", value: input.values.sessions },
+    { suffix: "active_users", name: `${input.channelLabel} Active Users`, unit: "users", value: input.values.activeUsers },
+    { suffix: "page_views", name: `${input.channelLabel} Page Views`, unit: "views", value: input.values.pageViews }
+  ];
+  for (const definition of definitions) pushMetric(metrics, input.channelKey, input.channelLabel, definition, input.period, input.propertyId);
+}
+
+function pushPublicationMetricSet(metrics: RawConnectorMetric[], input: {
+  channelKey: string;
+  channelLabel: string;
+  publicationCount: number;
+  values: Ga4ChannelMetrics;
+  period: ReportingPeriod;
+  propertyId: string;
+  paths: string[];
+}): void {
+  const definitions = [
+    { suffix: "publications", name: `${input.channelLabel} Publications`, unit: "publications", value: input.publicationCount },
+    { suffix: "sessions", name: `${input.channelLabel} Article Sessions`, unit: "sessions", value: input.values.sessions },
+    { suffix: "active_users", name: `${input.channelLabel} Article Active Users`, unit: "users", value: input.values.activeUsers },
+    { suffix: "page_views", name: `${input.channelLabel} Article Page Views`, unit: "views", value: input.values.pageViews }
+  ];
+  for (const definition of definitions) {
+    pushMetric(metrics, input.channelKey, input.channelLabel, definition, input.period, input.propertyId, input.paths);
+  }
+}
+
+function pushMetric(
+  metrics: RawConnectorMetric[],
+  channelKey: string,
+  channelLabel: string,
+  definition: { suffix: string; name: string; unit: string; value: number },
+  period: ReportingPeriod,
+  propertyId: string,
+  paths: string[] = []
+): void {
+  metrics.push({
+    sourceRecordId: `ga4:${channelKey}:${definition.suffix}:${period.startDate}:${period.endDate}`,
+    metricName: definition.name,
+    value: definition.value,
+    unit: definition.unit,
+    date: period.startDate,
+    targetTableKey: "kpiHistory",
+    platform: "GA4",
+    channel: channelLabel,
+    contentType: paths.length ? "Publication Analytics" : "Web Analytics",
+    activityVolume: definition.suffix === "publications" || definition.suffix === "sessions" ? definition.value : undefined,
+    dimensions: {
+      metricKey: `ga4_${channelKey}_${definition.suffix}`,
+      periodStart: period.startDate,
+      periodEnd: period.endDate,
+      periodType: "Monthly",
+      aggregationMethod: "Sum",
+      propertyId,
+      articlePaths: paths.join("|")
+    }
+  });
+}
+
+async function discoverPublications(url: string): Promise<PublicationEntry[]> {
+  const response = await fetch(url, { headers: { "User-Agent": "Elim-KPI-Dashboard/1.0" } });
+  if (!response.ok) throw new Error(`Publication discovery failed for ${url}: ${response.status} ${response.statusText}`);
+  const html = await response.text();
+  const entries: PublicationEntry[] = [];
+  const linkPattern = /href=["']([^"']*\/article-detail\/[^"'#?]+)["']/gi;
+  let linkMatch: RegExpExecArray | null;
+
+  while ((linkMatch = linkPattern.exec(html)) !== null) {
+    const href = decodeHtml(linkMatch[1] ?? "");
+    const before = stripTags(html.slice(Math.max(0, linkMatch.index - 3500), linkMatch.index));
+    const dates = Array.from(before.matchAll(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{2})\b/gi));
+    const dateMatch = dates[dates.length - 1];
+    if (!dateMatch) continue;
+    const publishedDate = parsePublicationDate(dateMatch[1], dateMatch[2], dateMatch[3]);
+    if (!publishedDate) continue;
+    const path = new URL(href, url).pathname.replace(/\/$/, "");
+    if (!path.startsWith("/article-detail/")) continue;
+    entries.push({ path, publishedDate });
+  }
+
+  const deduped = new Map<string, PublicationEntry>();
+  for (const entry of entries) deduped.set(`${entry.path}:${entry.publishedDate}`, entry);
+  return Array.from(deduped.values()).sort((a, b) => b.publishedDate.localeCompare(a.publishedDate));
+}
+
+function parsePublicationDate(day: string | undefined, month: string | undefined, year: string | undefined): string | undefined {
+  if (!day || !month || !year) return undefined;
+  const months: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+  const monthIndex = months[month.toLowerCase()];
+  if (monthIndex === undefined) return undefined;
+  const date = new Date(Date.UTC(2000 + Number(year), monthIndex, Number(day)));
+  return formatDate(date);
+}
+
+function stripTags(value: string): string {
+  return decodeHtml(value.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
+}
+
+function decodeHtml(value: string): string {
+  return value.replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
 function buildRollingMonthlyPeriods(now: Date): ReportingPeriod[] {
