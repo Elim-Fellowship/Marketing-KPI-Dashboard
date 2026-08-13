@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Data Imports | Communications Intelligence</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/data-imports.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-mark">CI</div>
+          <div>
+            <h1>Communications Intelligence</h1>
+            <p>Airtable-powered analytics</p>
+          </div>
+        </div>
+        <nav class="nav-tabs" aria-label="Primary pages">
+          <a class="nav-tab" href="/">KPI Overview</a>
+          <a class="nav-tab" href="/top-performing-content">Top Performing Content</a>
+          <a class="nav-tab" href="/channel-breakdown">Channel Breakdown</a>
+          <a class="nav-tab active" href="/data-imports.html" aria-current="page">Data Imports</a>
+        </nav>
+      </aside>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Operational Data Intake</p>
+            <h2>Data Imports</h2>
+          </div>
+          <div class="status-pill" id="import-status">Ready</div>
+        </header>
+
+        <section class="page-root imports-page">
+          <section class="band import-card">
+            <div class="section-row import-heading">
+              <div>
+                <p class="eyebrow">Spotify Podcast Analytics</p>
+                <h3 class="section-title">Upload Spotify analytics CSV</h3>
+                <p class="section-note">Upload the CSV exactly as exported. The backend validates, normalizes, checks duplicates, and updates Airtable automatically.</p>
+              </div>
+              <span class="source-chip">Spotify_Episode_Metrics</span>
+            </div>
+
+            <div class="import-steps">
+              <div class="import-step"><span class="step-number">1</span><div><strong>Export from Spotify</strong><p>Download the analytics CSV from Spotify for Creators. Do not edit the file.</p></div></div>
+              <div class="import-step"><span class="step-number">2</span><div><strong>Choose the file</strong><p>Drag the CSV below or browse to select it.</p></div></div>
+              <div class="import-step"><span class="step-number">3</span><div><strong>Import</strong><p>Existing episodes are updated, unchanged rows are skipped, and new episodes are created.</p></div></div>
+            </div>
+
+            <label class="drop-zone" id="drop-zone" for="spotify-file">
+              <input id="spotify-file" type="file" accept=".csv,text/csv" hidden>
+              <span class="drop-title">Drop Spotify CSV here</span>
+              <span class="drop-copy">or click to browse</span>
+              <span class="selected-file" id="selected-file">No file selected</span>
+            </label>
+
+            <div class="import-controls">
+              <label class="access-key-field">Import access key
+                <input id="import-key" type="password" autocomplete="off" placeholder="Enter staff import key">
+                <span>The key is kept only for this browser session.</span>
+              </label>
+              <button id="import-button" class="primary-action" type="button" disabled>Import Spotify Data</button>
+            </div>
+
+            <div id="import-result" class="import-result" hidden></div>
+          </section>
+
+          <section class="band">
+            <div class="section-row"><div><p class="eyebrow">This server session</p><h3 class="section-title">Recent Spotify imports</h3></div><button id="refresh-history" class="secondary-action" type="button">Refresh</button></div>
+            <div id="import-history" class="import-history"><div class="empty-state">Loading import history...</div></div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <script src="/data-imports.js" type="module"></script>
+  </body>
+</html>
