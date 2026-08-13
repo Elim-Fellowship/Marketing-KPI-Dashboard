@@ -266,7 +266,6 @@ function renderActivitySummaryItems(summary = {}) {
     ["Emails Sent", authoritativeItems.emailsSent],
     ["Podcasts Published", authoritativeItems.podcastsPublished],
     ["Social Posts Published", authoritativeItems.socialPostsPublished],
-    ["Website Active Users", authoritativeItems.uniqueWebsiteVisitors],
     ["Email Campaigns Sent", authoritativeItems.emailCampaignsSent]
   ];
 

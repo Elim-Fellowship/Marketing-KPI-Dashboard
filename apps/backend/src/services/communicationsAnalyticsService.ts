@@ -983,55 +983,50 @@ function buildMonthlyActivitySummary(
     return fromMonthlyActivitySummary;
   }
 
-  const emailsSent = sumKpiMetrics(kpiHistory, [
+  // Select authoritative KPI records (no double-counting overlapping records)
+  const emailsSentRecord = selectAuthoritativeKpiRecord(kpiHistory, [
     "emails sent",
     "email sends",
     "sent emails",
     "email volume"
   ]);
-  const podcastsPublished = sumKpiMetrics(kpiHistory, [
+  const podcastsPublishedRecord = selectAuthoritativeKpiRecord(kpiHistory, [
     "podcasts published",
     "episodes published",
     "podcast episodes"
   ]);
-  const socialPostsPublished = sumKpiMetrics(kpiHistory, [
+  const socialPostsPublishedRecord = selectAuthoritativeKpiRecord(kpiHistory, [
     "social posts published",
     "social posts",
     "posts published"
   ]);
-  const websiteArticlesPublished = sumKpiMetrics(kpiHistory, [
-    "website articles published",
-    "articles published",
-    "blog posts published"
-  ]);
-  const newsletterEditionsPublished = sumKpiMetrics(kpiHistory, [
-    "newsletter editions published",
-    "newsletter editions",
-    "newsletters published"
+  const emailCampaignsSentRecord = selectAuthoritativeKpiRecord(kpiHistory, [
+    "email campaigns sent",
+    "campaigns sent",
+    "email campaigns"
   ]);
 
-  const summary = {
-    emailsSent: emailsSent || countContentItems(contentPerformance, ["email"]),
-    podcastsPublished:
-      podcastsPublished || countContentItems(contentPerformance, ["podcast", "episode"]),
-    socialPostsPublished:
-      socialPostsPublished || countContentItems(contentPerformance, ["social", "post"]),
-    websiteArticlesPublished:
-      websiteArticlesPublished || countContentItems(contentPerformance, ["website", "article", "blog"]),
-    newsletterEditionsPublished:
-      newsletterEditionsPublished || countContentItems(contentPerformance, ["newsletter"])
+  const emailsSent = emailsSentRecord?.value ?? (countContentItems(contentPerformance, ["email"]) || 0);
+  const podcastsPublished = podcastsPublishedRecord?.value ?? (countContentItems(contentPerformance, ["podcast", "episode"]) || 0);
+  const socialPostsPublished = socialPostsPublishedRecord?.value ?? (countContentItems(contentPerformance, ["social", "post"]) || 0);
+  const emailCampaignsSent = emailCampaignsSentRecord?.value ?? 0;
+
+  const items = {
+    emailsSent: { value: emailsSent, available: emailsSentRecord !== null, source: emailsSentRecord?.source },
+    podcastsPublished: { value: podcastsPublished, available: podcastsPublishedRecord !== null, source: podcastsPublishedRecord?.source },
+    socialPostsPublished: { value: socialPostsPublished, available: socialPostsPublishedRecord !== null, source: socialPostsPublishedRecord?.source },
+    emailCampaignsSent: { value: emailCampaignsSent, available: emailCampaignsSentRecord !== null, source: emailCampaignsSentRecord?.source }
   };
 
-  const hasData = Object.values(summary).some((value) => Number(value) > 0);
+  const hasData = Object.values(items).some((item) => Number(item.value) > 0);
 
   return {
     hasData,
-    ...summary,
-    totalPublished:
-      summary.podcastsPublished +
-      summary.socialPostsPublished +
-      summary.websiteArticlesPublished +
-      summary.newsletterEditionsPublished
+    items,
+    emailsSent,
+    podcastsPublished,
+    socialPostsPublished,
+    emailCampaignsSent
   };
 }
 
@@ -1042,41 +1037,35 @@ function summarizeMonthlyActivityRows(
     return { hasData: false };
   }
 
-  const summary = {
-    emailsSent: sumRecordMetrics(records, ["Emails Sent", "Email Sends"]),
-    podcastsPublished: sumRecordMetrics(records, ["Podcasts Published", "Episodes Published"]),
-    socialPostsPublished: sumRecordMetrics(records, ["Social Posts Published", "Posts Published"]),
-    websiteArticlesPublished: sumRecordMetrics(records, [
-      "Website Articles Published",
-      "Articles Published",
-      "Blog Posts Published"
-    ]),
-    newsletterEditionsPublished: sumRecordMetrics(records, [
-      "Newsletter Editions Published",
-      "Newsletters Published"
-    ])
+  const emailsSent = sumRecordMetrics(records, ["Emails Sent", "Email Sends"]);
+  const podcastsPublished = sumRecordMetrics(records, ["Podcasts Published", "Episodes Published"]);
+  const socialPostsPublished = sumRecordMetrics(records, ["Social Posts Published", "Posts Published"]);
+  const emailCampaignsSent = sumRecordMetrics(records, ["Email Campaigns Sent", "Campaigns Sent"]);
+
+  const items = {
+    emailsSent: { value: emailsSent, available: emailsSent > 0, source: "Monthly Activity Summary" },
+    podcastsPublished: { value: podcastsPublished, available: podcastsPublished > 0, source: "Monthly Activity Summary" },
+    socialPostsPublished: { value: socialPostsPublished, available: socialPostsPublished > 0, source: "Monthly Activity Summary" },
+    emailCampaignsSent: { value: emailCampaignsSent, available: emailCampaignsSent > 0, source: "Monthly Activity Summary" }
   };
-  const totalPublished =
-    sumRecordMetrics(records, ["Total Published", "Content Published"]) ||
-    summary.podcastsPublished +
-      summary.socialPostsPublished +
-      summary.websiteArticlesPublished +
-      summary.newsletterEditionsPublished;
+
   const hasData = records.some((record) =>
     [
       "Emails Sent",
       "Podcasts Published",
       "Social Posts Published",
-      "Website Articles Published",
-      "Newsletter Editions Published",
+      "Email Campaigns Sent",
       "Total Published"
     ].some((fieldName) => fieldValue(record.fields, fieldName) !== undefined)
   );
 
   return {
     hasData,
-    ...summary,
-    totalPublished
+    items,
+    emailsSent,
+    podcastsPublished,
+    socialPostsPublished,
+    emailCampaignsSent
   };
 }
 
@@ -1389,6 +1378,50 @@ function calculateBufferEngagements(bufferMetrics: Array<NormalizedAirtableRecor
 }
 
 
+
+function selectAuthoritativeKpiRecord(
+  kpiHistory: Array<NormalizedAirtableRecord<Fields>>,
+  metricTerms: string[]
+): { value: number; source: string } | null {
+  // Filter records matching the metric terms
+  const matchingRecords = kpiHistory.filter((record) => {
+    const recordMetricKey = stringField(record.fields, ["Metric Key", "KPI"], "").toLowerCase();
+    return metricTerms.some((term) => recordMetricKey.includes(term.toLowerCase()));
+  });
+
+  if (matchingRecords.length === 0) {
+    return null;
+  }
+
+  // If only one record, return it
+  if (matchingRecords.length === 1) {
+    const record = matchingRecords[0];
+    const value = numberField(record.fields, ["Value", "Metric Value"]) ?? 0;
+    return { value, source: stringField(record.fields, ["Source", "Source Name"], "KPI_History") };
+  }
+
+  // Multiple records: prefer monthly/reporting-period over daily/weekly
+  // This prevents double-counting overlapping records
+  const recordsByGranularity = matchingRecords.sort((a, b) => {
+    const aGranularity = getRecordGranularity(a);
+    const bGranularity = getRecordGranularity(b);
+    // Order: Monthly (0) > Weekly (1) > Daily (2)
+    return aGranularity - bGranularity;
+  });
+
+  // Return the first (coarsest) granularity record
+  const authoritative = recordsByGranularity[0];
+  const value = numberField(authoritative.fields, ["Value", "Metric Value"]) ?? 0;
+  return { value, source: stringField(authoritative.fields, ["Source", "Source Name"], "KPI_History") };
+}
+
+function getRecordGranularity(record: NormalizedAirtableRecord<Fields>): number {
+  // Returns 0 for monthly, 1 for weekly, 2 for daily
+  const period = stringField(record.fields, ["Period", "Granularity", "Reporting Period"], "").toLowerCase();
+  if (period.includes("month")) return 0;
+  if (period.includes("week")) return 1;
+  return 2; // default to daily
+}
 
 function sumKpiByMetricKey(kpiHistory: Array<NormalizedAirtableRecord<Fields>>, metricKey: string): { value: number; hasData: boolean } {
   let total = 0;
