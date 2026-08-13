@@ -33,10 +33,11 @@
       const card = cards[index];
       const labelNode = card?.querySelector("span");
       const valueNode = card?.querySelector("strong");
-      if (labelNode) labelNode.textContent = label;
+      if (labelNode && labelNode.textContent !== label) labelNode.textContent = label;
       const item = latestSummary?.items?.[key];
-      if (valueNode && item && item.available === false) valueNode.textContent = "No data";
-      if (card && item?.source) card.title = `Source: ${item.source}`;
+      if (valueNode && item?.available === false && valueNode.textContent !== "No data") valueNode.textContent = "No data";
+      const title = item?.source ? `Source: ${item.source}` : "";
+      if (card && card.title !== title) card.title = title;
     });
   }
 })();
