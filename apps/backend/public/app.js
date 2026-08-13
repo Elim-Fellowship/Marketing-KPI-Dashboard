@@ -281,18 +281,19 @@ function renderActivitySummaryItems(summary = {}) {
     return `<div class="empty-state">No data available</div>`;
   }
 
+  const authoritativeItems = summary.items ?? {};
   const items = [
-    ["Emails Sent", summary.emailsSent],
-    ["Podcasts Published", summary.podcastsPublished],
-    ["Social Posts Published", summary.socialPostsPublished],
-    ["Website Articles Published", summary.websiteArticlesPublished],
-    ["Newsletter Editions Published", summary.newsletterEditionsPublished]
+    ["Emails Sent", authoritativeItems.emailsSent],
+    ["Podcasts Published", authoritativeItems.podcastsPublished],
+    ["Social Posts Published", authoritativeItems.socialPostsPublished],
+    ["Website Active Users", authoritativeItems.uniqueWebsiteVisitors],
+    ["Email Campaigns Sent", authoritativeItems.emailCampaignsSent]
   ];
 
-  return items.map(([label, value]) => `
-    <article class="activity-item">
+  return items.map(([label, item]) => `
+    <article class="activity-item"${item?.source ? ` title="${escapeHtml(`Source: ${item.source}`)}"` : ""}>
       <span>${escapeHtml(label)}</span>
-      <strong>${formatNumber(value)}</strong>
+      <strong>${item?.available === false || !item ? "No data" : formatNumber(item.value)}</strong>
     </article>
   `).join("");
 }
