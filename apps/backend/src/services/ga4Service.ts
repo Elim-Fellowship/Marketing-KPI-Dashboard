@@ -45,7 +45,7 @@ export class Ga4Service {
       if (!parsed.client_email || !parsed.private_key) throw new Error("Missing client_email or private_key");
       return parsed;
     } catch (error) {
-      throw new AppError("INVALID_CONFIG", "GA4_SERVICE_ACCOUNT_JSON is not valid service-account JSON", { cause: error instanceof Error ? error.message : String(error) });
+      throw new AppError("VALIDATION_FAILED", "GA4_SERVICE_ACCOUNT_JSON is not valid service-account JSON", { cause: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -71,7 +71,7 @@ export class Ga4Service {
     });
     const payload = await tokenResponse.json() as any;
     if (!tokenResponse.ok || !payload.access_token) {
-      throw new AppError("EXTERNAL_API_ERROR", `GA4 token request failed (${tokenResponse.status}): ${payload.error_description ?? payload.error ?? tokenResponse.statusText}`);
+      throw new Error(`GA4 token request failed (${tokenResponse.status}): ${payload.error_description ?? payload.error ?? tokenResponse.statusText}`);
     }
     return payload.access_token;
   }
@@ -91,7 +91,7 @@ export class Ga4Service {
     });
     const payload = await response.json() as any;
     if (!response.ok) {
-      throw new AppError("EXTERNAL_API_ERROR", `GA4 Data API request failed (${response.status}): ${payload.error?.message ?? response.statusText}`, { googleError: payload.error });
+      throw new Error(`GA4 Data API request failed (${response.status}): ${payload.error?.message ?? response.statusText}`);
     }
     return payload;
   }
