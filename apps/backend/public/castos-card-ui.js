@@ -5,9 +5,9 @@ const activityLabels = {
   spotify: "Episodes tracked",
   castos: "Podcast episodes published",
   youtube: "Videos published",
-  website: "Articles / pages published",
-  "voice of elim": "Email campaigns sent",
-  "elim updates": "Email campaigns sent"
+  website: "Sessions",
+  "voice of elim": "Publications",
+  "elim updates": "Publications"
 };
 
 function patchChannelCards() {
@@ -46,8 +46,4 @@ function patchChannelCards() {
 }
 
 patchChannelCards();
-
-// The dashboard re-renders cards when filters or pages change. Polling is
-// intentionally used instead of MutationObserver so card label updates cannot
-// recursively trigger themselves.
 window.setInterval(patchChannelCards, 1000);
