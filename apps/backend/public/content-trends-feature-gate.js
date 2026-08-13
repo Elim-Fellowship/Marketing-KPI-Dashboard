@@ -150,8 +150,11 @@ function trendStyles() {
 }
 
 function renderTrendCard(channel) {
-  const status = trendStatus(channel);
-  const health = healthDefinition(channel);
+const status = backendTrendStatus(channel);  
+  const health = {
+  label: channel.signalLabel ?? channel.metricLabel ?? "Engagement",
+  description: channel.rationale ?? "Normalized channel engagement"
+};
   return `
     <article class="content-trend-card content-trend-${status.key}">
       <div class="content-trend-card-header">
@@ -166,7 +169,50 @@ function renderTrendCard(channel) {
     </article>
   `;
 }
+function backendTrendStatus(channel) {
+  const status = channel?.status;
 
+  if (status === "improving") {
+    return {
+      key: "up",
+      arrow: channel.arrow ?? "↑",
+      label: "Improving",
+      value: Number.isFinite(Number(channel.changePercent))
+        ? `+${Math.abs(Number(channel.changePercent)).toFixed(1)}%`
+        : "—"
+    };
+  }
+
+  if (status === "declining") {
+    return {
+      key: "down",
+      arrow: channel.arrow ?? "↓",
+      label: "Declining",
+      value: Number.isFinite(Number(channel.changePercent))
+        ? `−${Math.abs(Number(channel.changePercent)).toFixed(1)}%`
+        : "—"
+    };
+  }
+
+  if (status === "stable") {
+    const change = Number(channel.changePercent);
+    return {
+      key: "stable",
+      arrow: channel.arrow ?? "→",
+      label: "Stable",
+      value: Number.isFinite(change)
+        ? `${change > 0 ? "+" : change < 0 ? "−" : ""}${Math.abs(change).toFixed(1)}%`
+        : "—"
+    };
+  }
+
+  return {
+    key: "unavailable",
+    arrow: channel?.arrow ?? "—",
+    label: status === "no_data" ? "No data" : "Not enough history",
+    value: "—"
+  };
+}
 function renderTrendSummary(channels = []) {
   const counts = trendStatusCounts(channels);
   return `
@@ -176,7 +222,14 @@ function renderTrendSummary(channels = []) {
     <div class="content-trend-summary-item content-trend-summary-unavailable"><span>Insufficient history</span><strong>${counts.unavailable}</strong></div>
   `;
 }
-
+function renderBackendTrendSummary(summary = {}) {
+  return `
+    <div class="content-trend-summary-item content-trend-summary-up"><span>Improving</span><strong>${summary.improving ?? 0}</strong></div>
+    <div class="content-trend-summary-item content-trend-summary-stable"><span>Stable</span><strong>${summary.stable ?? 0}</strong></div>
+    <div class="content-trend-summary-item content-trend-summary-down"><span>Declining</span><strong>${summary.declining ?? 0}</strong></div>
+    <div class="content-trend-summary-item content-trend-summary-unavailable"><span>Insufficient history</span><strong>${(summary.insufficient_history ?? 0) + (summary.no_data ?? 0)}</strong></div>
+  `;
+}
 function trendAnalysisShell() {
   return `
     <section class="band content-trend-analysis" id="content-trend-analysis">
@@ -241,20 +294,17 @@ async function loadContentTrendAnalysis() {
   }
 
   const requestId = ++contentTrendRequestId;
-  const range = rollingTrendRange(contentTrendPeriod);
   summary.innerHTML = "";
   grid.innerHTML = `<div class="empty-state">Loading channel health...</div>`;
   footnote.textContent = `Selected ${CONTENT_TREND_PERIODS[contentTrendPeriod].label.toLowerCase()} compared with the immediately preceding equivalent period.`;
 
   try {
-    const params = new URLSearchParams({ startDate: range.startDate, endDate: range.endDate, dateMode: "custom" });
-    const response = await fetch(`/api/channel-breakdown?${params.toString()}`);
-    if (!response.ok) throw new Error(`Request failed (${response.status})`);
+   
+const response = await fetch(`/api/content-trend-analysis?period=${encodeURIComponent(contentTrendPeriod)}`);    if (!response.ok) throw new Error(`Request failed (${response.status})`);
     const data = await response.json();
     if (requestId !== contentTrendRequestId) return;
     const channels = data.channels ?? [];
-    summary.innerHTML = channels.length ? renderTrendSummary(channels) : "";
-    grid.innerHTML = channels.length ? channels.map(renderTrendCard).join("") : `<div class="empty-state">No channel analytics are available for this timeframe.</div>`;
+summary.innerHTML = channels.length ? renderBackendTrendSummary(data.summary) : "";    grid.innerHTML = channels.length ? channels.map(renderTrendCard).join("") : `<div class="empty-state">No channel analytics are available for this timeframe.</div>`;
   } catch (error) {
     if (requestId !== contentTrendRequestId) return;
     summary.innerHTML = "";
