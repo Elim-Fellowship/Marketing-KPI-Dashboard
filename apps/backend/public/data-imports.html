@@ -10,69 +10,33 @@
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand-block">
-          <div class="brand-mark">CI</div>
-          <div>
-            <h1>Communications Intelligence</h1>
-            <p>Airtable-powered analytics</p>
-          </div>
-        </div>
+        <div class="brand-block"><div class="brand-mark">CI</div><div><h1>Communications Intelligence</h1><p>Airtable-powered analytics</p></div></div>
         <nav class="nav-tabs" aria-label="Primary pages">
-          <a class="nav-tab" href="/">KPI Overview</a>
-          <a class="nav-tab" href="/top-performing-content">Top Performing Content</a>
-          <a class="nav-tab" href="/channel-breakdown">Channel Breakdown</a>
-          <a class="nav-tab active" href="/data-imports.html" aria-current="page">Data Imports</a>
+          <a class="nav-tab" href="/">KPI Overview</a><a class="nav-tab" href="/top-performing-content">Top Performing Content</a><a class="nav-tab" href="/channel-breakdown">Channel Breakdown</a><a class="nav-tab active" href="/data-imports.html" aria-current="page">Data Imports</a>
         </nav>
       </aside>
-
       <main class="main-panel">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">Operational Data Intake</p>
-            <h2>Data Imports</h2>
-          </div>
-          <div class="status-pill" id="import-status">Ready</div>
-        </header>
-
+        <header class="topbar"><div><p class="eyebrow">Operational Data Intake</p><h2>Data Imports</h2></div><div class="status-pill" id="import-status">Ready</div></header>
         <section class="page-root imports-page">
           <section class="band import-card">
-            <div class="section-row import-heading">
-              <div>
-                <p class="eyebrow">Spotify Podcast Analytics</p>
-                <h3 class="section-title">Upload Spotify analytics CSV</h3>
-                <p class="section-note">Upload the CSV exactly as exported. The backend validates, normalizes, checks duplicates, and updates Airtable automatically.</p>
-              </div>
-              <span class="source-chip">Spotify_Episode_Metrics</span>
-            </div>
-
+            <div class="section-row import-heading"><div><p class="eyebrow">Spotify Podcast Analytics</p><h3 class="section-title">Upload Spotify analytics exports</h3><p class="section-note">Select both Spotify for Creators CSV exports for the same reporting period. The system identifies each file automatically, validates the pair, normalizes the metrics, checks duplicates, and updates Airtable.</p></div><span class="source-chip">KPI_History</span></div>
             <div class="import-steps">
-              <div class="import-step"><span class="step-number">1</span><div><strong>Export from Spotify</strong><p>Download the analytics CSV from Spotify for Creators. Do not edit the file.</p></div></div>
-              <div class="import-step"><span class="step-number">2</span><div><strong>Choose the file</strong><p>Drag the CSV below or browse to select it.</p></div></div>
-              <div class="import-step"><span class="step-number">3</span><div><strong>Import</strong><p>Existing episodes are updated, unchanged rows are skipped, and new episodes are created.</p></div></div>
+              <div class="import-step"><span class="step-number">1</span><div><strong>Export two files</strong><p>From Spotify for Creators, download <b>Engagement</b> and <b>Top Episodes by Consumption Time</b> for the same date range.</p></div></div>
+              <div class="import-step"><span class="step-number">2</span><div><strong>Select both CSVs</strong><p>Drag both files here at once, or browse and multi-select them. Do not edit the files first.</p></div></div>
+              <div class="import-step"><span class="step-number">3</span><div><strong>Import</strong><p>The importer detects the file types from their headers and tells you exactly what is missing if the pair is incomplete.</p></div></div>
             </div>
-
             <label class="drop-zone" id="drop-zone" for="spotify-file">
-              <input id="spotify-file" type="file" accept=".csv,text/csv" hidden>
-              <span class="drop-title">Drop Spotify CSV here</span>
-              <span class="drop-copy">or click to browse</span>
-              <span class="selected-file" id="selected-file">No file selected</span>
+              <input id="spotify-file" type="file" accept=".csv,text/csv" multiple hidden>
+              <span class="drop-title">Drop both Spotify CSV files here</span><span class="drop-copy">or click to browse and select both</span><span class="selected-file" id="selected-file">No files selected</span>
             </label>
-
+            <div id="file-detection" class="section-note">Required: Engagement + Top Episodes by Consumption Time.</div>
             <div class="import-controls">
-              <label class="access-key-field">Staff PIN
-                <input id="import-key" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="Enter 6-digit PIN">
-                <span>The PIN is kept only for this browser session and is used only for Spotify data imports.</span>
-              </label>
+              <label class="access-key-field">Staff PIN<input id="import-key" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="Enter 6-digit PIN"><span>The PIN is kept only for this browser session and is used only for Spotify data imports.</span></label>
               <button id="import-button" class="primary-action" type="button" disabled>Import Spotify Data</button>
             </div>
-
             <div id="import-result" class="import-result" hidden></div>
           </section>
-
-          <section class="band">
-            <div class="section-row"><div><p class="eyebrow">This server session</p><h3 class="section-title">Recent Spotify imports</h3></div><button id="refresh-history" class="secondary-action" type="button">Refresh</button></div>
-            <div id="import-history" class="import-history"><div class="empty-state">Loading import history...</div></div>
-          </section>
+          <section class="band"><div class="section-row"><div><p class="eyebrow">This server session</p><h3 class="section-title">Recent Spotify imports</h3></div><button id="refresh-history" class="secondary-action" type="button">Refresh</button></div><div id="import-history" class="import-history"><div class="empty-state">Loading import history...</div></div></section>
         </section>
       </main>
     </div>
