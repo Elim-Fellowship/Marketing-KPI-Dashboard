@@ -81,9 +81,16 @@ export class Ga4Service {
         activeUsers: finite(totals[1]?.value),
         pageViews: finite(totals[2]?.value)
       },
-      voiceOfElim: aggregateExactPath(rows, "/the-voice-of-elim"),
-      elimUpdates: aggregateExactPath(rows, "/updates")
+      voiceOfElim: aggregateExactPaths(rows, ["/the-voice-of-elim"]),
+      elimUpdates: aggregateExactPaths(rows, ["/updates"])
     };
+  }
+
+  async fetchMetricsForPaths(startDate: string, endDate: string, pagePaths: string[]): Promise<Ga4ChannelMetrics> {
+    validateRange(startDate, endDate);
+    if (pagePaths.length === 0) return { sessions: 0, activeUsers: 0, pageViews: 0 };
+    const report = await this.getPageReport(startDate, endDate, 10000);
+    return aggregateExactPaths(this.mapRows(report.rows ?? []), pagePaths);
   }
 
   private mapRows(rows: any[]): PageMetricRow[] {
@@ -162,14 +169,20 @@ export class Ga4Service {
   }
 }
 
-function aggregateExactPath(rows: PageMetricRow[], pagePath: string): Ga4ChannelMetrics {
+function aggregateExactPaths(rows: PageMetricRow[], pagePaths: string[]): Ga4ChannelMetrics {
+  const pathSet = new Set(pagePaths.map(normalizePath));
   return rows
-    .filter((row) => row.pagePath === pagePath)
+    .filter((row) => pathSet.has(normalizePath(row.pagePath)))
     .reduce<Ga4ChannelMetrics>((sum, row) => ({
       sessions: sum.sessions + row.sessions,
       activeUsers: sum.activeUsers + row.activeUsers,
       pageViews: sum.pageViews + row.screenPageViews
     }), { sessions: 0, activeUsers: 0, pageViews: 0 });
+}
+
+function normalizePath(value: string): string {
+  const path = value.split("?")[0]?.replace(/\/$/, "") ?? value;
+  return path || "/";
 }
 
 function validateRange(startDate: string, endDate: string): void {
