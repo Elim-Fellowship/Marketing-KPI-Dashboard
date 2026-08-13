@@ -9,14 +9,15 @@ const historyRoot = document.querySelector("#import-history");
 const refreshHistory = document.querySelector("#refresh-history");
 
 let currentFile;
-const storedKey = window.sessionStorage.getItem("spotifyImportKey");
-if (storedKey) importKey.value = storedKey;
+const storedPin = window.sessionStorage.getItem("spotifyImportPin");
+if (storedPin) importKey.value = storedPin;
 
 fileInput.addEventListener("change", () => setFile(fileInput.files?.[0]));
 importKey.addEventListener("input", () => {
-  const value = importKey.value.trim();
-  if (value) window.sessionStorage.setItem("spotifyImportKey", value);
-  else window.sessionStorage.removeItem("spotifyImportKey");
+  const value = importKey.value.replace(/\D/g, "").slice(0, 6);
+  importKey.value = value;
+  if (value) window.sessionStorage.setItem("spotifyImportPin", value);
+  else window.sessionStorage.removeItem("spotifyImportPin");
   updateButtonState();
 });
 
@@ -39,12 +40,12 @@ function setFile(file) {
   updateButtonState();
 }
 
-function updateButtonState() { importButton.disabled = !currentFile || !importKey.value.trim(); }
+function updateButtonState() { importButton.disabled = !currentFile || !/^\d{6}$/.test(importKey.value); }
 
 async function importSpotifyCsv() {
   if (!currentFile) return;
-  const key = importKey.value.trim();
-  if (!key) return;
+  const pin = importKey.value.trim();
+  if (!/^\d{6}$/.test(pin)) { showResult("error", "Enter the 6-digit staff PIN."); return; }
   importButton.disabled = true;
   importButton.textContent = "Importing...";
   importStatus.textContent = "Importing";
@@ -52,10 +53,10 @@ async function importSpotifyCsv() {
 
   try {
     const csv = await currentFile.text();
-    const response = await fetch("/api/ingestion/sync", {
+    const response = await fetch("/api/data-imports/spotify", {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ connectorId: "spotify", dryRun: false, csv })
+      headers: { "X-Staff-Pin": pin, "Content-Type": "application/json" },
+      body: JSON.stringify({ csv })
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body?.error?.message ?? body?.error?.code ?? `Import failed (${response.status})`);
