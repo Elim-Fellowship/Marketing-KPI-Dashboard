@@ -7,6 +7,8 @@ import { calculatePercentChange } from "./kpiCalculationEngine.js";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STABLE_THRESHOLD_PERCENT = 5;
 const KPI_HISTORY_DATE_FIELDS = ["Date", "Reporting Date", "Period", "Month", "Week", "Period Start"];
+const BUFFER_DATE_FIELDS = ["Metric Date", "Date", "Published At", "Publish Date"];
+const BUFFER_SOCIAL_METRIC_TERMS = ["reactions", "reaction", "likes", "like"];
 
 type TrendPeriod = "90d" | "6m" | "1y" | "all";
 type HealthStatus = "improving" | "stable" | "declining" | "insufficient_history" | "no_data";
@@ -25,6 +27,12 @@ interface BaseChannel {
   changePercent?: unknown;
   hasData?: unknown;
   source?: unknown;
+}
+
+interface SignalMeasurement {
+  currentValue: number;
+  previousValue: number;
+  hasCurrentData: boolean;
 }
 
 interface HealthSignalDefinition {
@@ -151,19 +159,24 @@ export class ContentTrendAnalysisService {
 
     const dateRange = rollingDateRange(period);
     const previousDateRange = previousEquivalentRange(dateRange);
-    const [breakdown, kpiHistory] = await Promise.all([
+    const [breakdown, kpiHistory, bufferPostMetrics] = await Promise.all([
       this.analytics.getChannelBreakdown({ ...dateRange, dateMode: "custom" }),
-      this.airtable.getRecords("kpiHistory", { maxRecords: 2000 })
+      this.airtable.getRecords("kpiHistory", { maxRecords: 2000 }),
+      this.airtable.getRecords("bufferPostMetrics", { maxRecords: 2000 })
     ]);
     const baseChannels = Array.isArray(breakdown.channels) ? breakdown.channels as BaseChannel[] : [];
 
     const channels = HEALTH_SIGNALS.map((definition) => {
       const base = baseChannels.find((channel) => String(channel.key ?? "") === definition.key);
-      const override = definition.preferKpiHistory
+      const bufferOverride = isBufferSocialSignal(definition)
+        ? measureBufferSocialSignal(bufferPostMetrics, definition, dateRange, previousDateRange)
+        : undefined;
+      const kpiOverride = definition.preferKpiHistory
         ? measureKpiSignal(kpiHistory, definition, dateRange, previousDateRange)
         : undefined;
-
+      const override = bufferOverride?.hasCurrentData ? bufferOverride : kpiOverride;
       const useOverride = Boolean(override?.hasCurrentData);
+      const usingBuffer = Boolean(bufferOverride?.hasCurrentData);
       const currentValue = useOverride ? override!.currentValue : numericValue(base?.metricValue);
       const previousValue = useOverride ? override!.previousValue : numericValue(base?.previousMetricValue);
       const hasData = useOverride || base?.hasData === true;
@@ -175,7 +188,7 @@ export class ContentTrendAnalysisService {
       return {
         key: definition.key,
         label: definition.label,
-        signalLabel: useOverride ? definition.signalLabel : String(base?.metricLabel ?? definition.signalLabel),
+        signalLabel: definition.signalLabel,
         intendedSignalLabel: definition.signalLabel,
         rationale: definition.rationale,
         currentValue,
@@ -183,8 +196,12 @@ export class ContentTrendAnalysisService {
         changePercent,
         status,
         arrow: statusArrow(status),
-        source: useOverride ? "KPI_History" : String(base?.source ?? "No matching source rows"),
-        usingPreferredSignal: !definition.preferKpiHistory || useOverride,
+        source: usingBuffer
+          ? "Buffer_Post_Metrics"
+          : useOverride
+            ? "KPI_History"
+            : String(base?.source ?? "No matching source rows"),
+        usingPreferredSignal: usingBuffer || !definition.preferKpiHistory || useOverride,
         fallbackReason: definition.preferKpiHistory && !useOverride
           ? `${definition.signalLabel} was not available in KPI_History for the selected period; the existing normalized channel metric was used instead.`
           : undefined
@@ -212,12 +229,59 @@ export class ContentTrendAnalysisService {
   }
 }
 
+function isBufferSocialSignal(definition: HealthSignalDefinition): boolean {
+  return definition.key === "instagram" || definition.key === "facebook";
+}
+
+function measureBufferSocialSignal(
+  records: Array<NormalizedAirtableRecord<Fields>>,
+  definition: HealthSignalDefinition,
+  currentRange: DateRange,
+  previousRange: DateRange
+): SignalMeasurement {
+  const matching = records.filter((record) => bufferRecordMatchesSocialSignal(record.fields, definition));
+  const current = filterBufferByDate(matching, currentRange);
+  const previous = filterBufferByDate(matching, previousRange);
+  return {
+    currentValue: sumBufferValues(current),
+    previousValue: sumBufferValues(previous),
+    hasCurrentData: current.length > 0
+  };
+}
+
+function bufferRecordMatchesSocialSignal(fields: Fields, definition: HealthSignalDefinition): boolean {
+  const platformText = searchableText(fields, ["Platform", "Channel", "Source Platform"]);
+  const metricText = searchableText(fields, ["Metric Name", "Metric", "Type"]);
+  const sourceText = searchableText(fields, ["Source Name", "Source"]);
+  const platformMatches = definition.aliases.some((alias) => platformText.includes(alias.toLowerCase()));
+  const metricMatches = BUFFER_SOCIAL_METRIC_TERMS.some((term) => metricText.includes(term));
+  const sourceMatches = !sourceText || sourceText.includes("buffer");
+  return platformMatches && metricMatches && sourceMatches;
+}
+
+function filterBufferByDate(
+  records: Array<NormalizedAirtableRecord<Fields>>,
+  range: DateRange
+): Array<NormalizedAirtableRecord<Fields>> {
+  return records.filter((record) => {
+    const value = dateField(record.fields, BUFFER_DATE_FIELDS);
+    return value >= range.startDate && value <= range.endDate;
+  });
+}
+
+function sumBufferValues(records: Array<NormalizedAirtableRecord<Fields>>): number {
+  return roundOne(records.reduce(
+    (sum, record) => sum + numberField(record.fields, ["Metric Value", "Value", "Count"]),
+    0
+  ));
+}
+
 function measureKpiSignal(
   records: Array<NormalizedAirtableRecord<Fields>>,
   definition: HealthSignalDefinition,
   currentRange: DateRange,
   previousRange: DateRange
-): { currentValue: number; previousValue: number; hasCurrentData: boolean } {
+): SignalMeasurement {
   const matching = records.filter((record) => kpiRecordMatchesSignal(record.fields, definition));
   const current = filterByDate(matching, currentRange);
   const previous = filterByDate(matching, previousRange);
