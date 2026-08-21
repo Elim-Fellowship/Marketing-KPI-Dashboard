@@ -68,7 +68,8 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
 
   override async getOverview(query: { startDate?: string; endDate?: string; dateMode?: string } = {}): Promise<Record<string, unknown>> {
     const base = await super.getOverview(query) as Record<string, any>;
-    const [kpiHistory, bufferPosts] = await Promise.all([
+    const [contentPerformance, kpiHistory, bufferPosts] = await Promise.all([
+      this.liveAirtable.getRecords("contentPerformance", { maxRecords: 1000 }),
       this.liveAirtable.getRecords("kpiHistory", { maxRecords: 1000 }),
       this.liveAirtable.getRecords("bufferPostMetrics", { maxRecords: 2000 })
     ]);
@@ -76,18 +77,18 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
 
     const emailRecord = findSourceMetric(kpiHistory, "mailchimp", "emails_sent", dateRange);
     const campaignRecord = findSourceMetric(kpiHistory, "mailchimp", "campaigns_sent", dateRange);
-    const spotifyCoverage = filterSpotifyKpiRecords(kpiHistory, "spotify_episode_consumption_hours", dateRange);
-    const spotifyPublished = spotifyCoverage.filter((record) => isSpotifyEpisodePublishedInRange(record, dateRange));
+    const castosPublicationCoverage = filterCastosPublishedEpisodes(contentPerformance, {});
+    const castosPublished = filterCastosPublishedEpisodes(contentPerformance, dateRange);
     const bufferSummary = summarizeBufferPublishedPosts(bufferPosts, dateRange);
 
     const items: Record<string, ActivityItem> = {
       emailsSent: activityItem(emailRecord, "KPI_History / Mailchimp", "emails_sent"),
       podcastsPublished: {
-        value: spotifyPublished.length,
-        available: spotifyCoverage.length > 0,
-        source: "KPI_History / Spotify",
-        metricKey: "spotify_episode_consumption_hours",
-        note: "Counts Spotify episodes whose encoded publish date falls inside the selected reporting range."
+        value: castosPublished.length,
+        available: castosPublicationCoverage.length > 0,
+        source: "Content_Performance / Castos",
+        metricKey: "Podcasts Published",
+        note: "Counts Castos publication records with Metric Type 'Podcasts Published' whose Publish Date falls inside the selected reporting range."
       },
       socialPostsPublished: {
         value: bufferSummary.count,
@@ -113,6 +114,7 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
       monthlyActivitySummary,
       rawCounts: {
         ...(base.rawCounts ?? {}),
+        contentPerformance: contentPerformance.length,
         bufferPostMetrics: bufferPosts.length
       }
     };
@@ -163,8 +165,8 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
     ]);
     const dateRange = (base.dateRange ?? {}) as DateRangeLike;
     const previousDateRange = (base.previousDateRange ?? {}) as DateRangeLike;
-    const currentCastos = filterCastosEpisodes(contentPerformance, dateRange);
-    const previousCastos = filterCastosEpisodes(contentPerformance, previousDateRange);
+    const currentCastos = filterCastosPublishedEpisodes(contentPerformance, dateRange);
+    const previousCastos = filterCastosPublishedEpisodes(contentPerformance, previousDateRange);
     const currentCastosListens = findSourceMetric(kpiHistory, "castos", "castos_listens", dateRange);
     const previousCastosListens = findSourceMetric(kpiHistory, "castos", "castos_listens", previousDateRange);
     const currentSpotify = filterSpotifyEpisodes(spotifyEpisodes, dateRange);
@@ -265,15 +267,6 @@ function summarizeBufferEngagements(records: Array<NormalizedAirtableRecord<Fiel
     total += numberField(record.fields, ["Metric Value", "Value", "Count"]);
   }
   return { value: total, available };
-}
-
-function isSpotifyEpisodePublishedInRange(record: NormalizedAirtableRecord<Fields>, range: DateRangeLike): boolean {
-  if (!range.startDate || !range.endDate) return false;
-  const explicitDate = dateField(record.fields, ["Publish Date"]);
-  const sourceRecordId = stringField(record.fields, ["Source Record ID"], "");
-  const encodedDate = /\|published:(\d{4}-\d{2}-\d{2})$/i.exec(sourceRecordId)?.[1];
-  const publishDate = explicitDate || encodedDate || "";
-  return Boolean(publishDate && publishDate >= range.startDate && publishDate <= range.endDate);
 }
 
 function summarizeBufferPublishedPosts(records: Array<NormalizedAirtableRecord<Fields>>, range: DateRangeLike): { count: number; available: boolean } {
@@ -508,11 +501,24 @@ function filterSpotifyEpisodes(records: Array<NormalizedAirtableRecord<Fields>>,
   });
 }
 
-function filterCastosEpisodes(records: Array<NormalizedAirtableRecord<Fields>>, range: DateRangeLike): Array<NormalizedAirtableRecord<Fields>> {
-  return records.filter((record) => { if (!isCastosEpisode(record.fields)) return false; if (!range.startDate || !range.endDate) return true; const date = dateField(record.fields, ["Publish Date", "Published At", "Date", "Created At"]); return Boolean(date && date >= range.startDate && date <= range.endDate); });
+function filterCastosPublishedEpisodes(records: Array<NormalizedAirtableRecord<Fields>>, range: DateRangeLike): Array<NormalizedAirtableRecord<Fields>> {
+  return records.filter((record) => {
+    if (!isCastosPublishedEpisode(record.fields)) return false;
+    if (!range.startDate || !range.endDate) return true;
+    const date = dateField(record.fields, ["Publish Date", "Published At", "Date", "Created At"]);
+    return Boolean(date && date >= range.startDate && date <= range.endDate);
+  });
 }
-function isCastosEpisode(fields: Fields): boolean {
-  const source = [stringField(fields, ["Platform"], ""), stringField(fields, ["Source Platform"], ""), stringField(fields, ["Source"], ""), stringField(fields, ["Source Name"], "")].join(" ").toLowerCase(); if (!source.includes("castos")) return false;
-  const typeAndMetric = [stringField(fields, ["Content Type"], ""), stringField(fields, ["Metric Type"], ""), stringField(fields, ["Metric"], ""), stringField(fields, ["KPI"], "")].join(" ").toLowerCase(); return typeAndMetric.includes("podcast") || typeAndMetric.includes("published");
+
+function isCastosPublishedEpisode(fields: Fields): boolean {
+  const source = [
+    stringField(fields, ["Platform"], ""),
+    stringField(fields, ["Source Platform"], ""),
+    stringField(fields, ["Source"], ""),
+    stringField(fields, ["Source Name"], "")
+  ].join(" ").toLowerCase();
+  if (!source.includes("castos")) return false;
+  return stringField(fields, ["Metric Type"], "").trim().toLowerCase() === "podcasts published";
 }
+
 function finiteNumber(value: unknown): number { const parsed = Number(value ?? 0); return Number.isFinite(parsed) ? parsed : 0; }
