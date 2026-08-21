@@ -6,6 +6,7 @@ import type { AirtableTableKey } from "../types/airtableTables.js";
 export type ConnectorId =
   | "mailchimp"
   | "castos"
+  | "castos-import"
   | "youtube"
   | "website"
   | "spotify"
