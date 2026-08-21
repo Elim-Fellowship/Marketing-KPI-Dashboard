@@ -63,12 +63,12 @@ export class CastosAwareCommunicationsAnalyticsService extends BaseCastosAwareCo
         previous: aggregateSourceMetricForRange(kpiHistory, "google analytics 4", "ga4_website_active_users", previousDateRange)
       }],
       ["email_opens", {
-        current: aggregateSourceMetricForRange(kpiHistory, "mailchimp", "email_opens", dateRange),
-        previous: aggregateSourceMetricForRange(kpiHistory, "mailchimp", "email_opens", previousDateRange)
+        current: aggregateMailchimpCountForRange(kpiHistory, "email_opens", "email_open_rate", dateRange),
+        previous: aggregateMailchimpCountForRange(kpiHistory, "email_opens", "email_open_rate", previousDateRange)
       }],
       ["email_clicks", {
-        current: aggregateSourceMetricForRange(kpiHistory, "mailchimp", "email_clicks", dateRange),
-        previous: aggregateSourceMetricForRange(kpiHistory, "mailchimp", "email_clicks", previousDateRange)
+        current: aggregateMailchimpCountForRange(kpiHistory, "email_clicks", "email_click_rate", dateRange),
+        previous: aggregateMailchimpCountForRange(kpiHistory, "email_clicks", "email_click_rate", previousDateRange)
       }],
       ["new_email_subscribers", {
         current: aggregateSourceMetricForRange(kpiHistory, "mailchimp", "new_subscribers", dateRange),
@@ -116,6 +116,57 @@ export function aggregateSourceMetricForRange(
   metricKey: string,
   range: DateRangeLike
 ): MetricAggregate {
+  const selected = selectSourceMetricRecordsForRange(records, sourceTerm, metricKey, range);
+  if (!selected.records.length) return unavailableMetric(selected.note);
+  return aggregateRecords(selected.records, selected.note);
+}
+
+function aggregateMailchimpCountForRange(
+  records: Array<NormalizedAirtableRecord<Fields>>,
+  directMetricKey: string,
+  rateMetricKey: string,
+  range: DateRangeLike
+): MetricAggregate {
+  const direct = selectSourceMetricRecordsForRange(records, "mailchimp", directMetricKey, range);
+  const rate = selectSourceMetricRecordsForRange(records, "mailchimp", rateMetricKey, range);
+  const valuesByPeriod = new Map<string, { value: number; source: "direct" | "numerator" }>();
+
+  for (const record of rate.records) {
+    const period = recordPeriod(record);
+    const numerator = numberField(record.fields, ["Numerator"]);
+    if (!period.start || !period.end || !Number.isFinite(numerator)) continue;
+    valuesByPeriod.set(`${period.start}|${period.end}`, { value: numerator, source: "numerator" });
+  }
+
+  for (const record of direct.records) {
+    const period = recordPeriod(record);
+    const value = numberField(record.fields, ["Value", "Metric Value", "Current Value", "Amount"]);
+    if (!period.start || !period.end || !Number.isFinite(value)) continue;
+    valuesByPeriod.set(`${period.start}|${period.end}`, { value, source: "direct" });
+  }
+
+  if (!valuesByPeriod.size) {
+    return unavailableMetric("No complete Mailchimp count or rate-numerator reporting periods fall inside the selected range.");
+  }
+
+  const values = [...valuesByPeriod.values()];
+  const fallbackCount = values.filter((item) => item.source === "numerator").length;
+  return {
+    value: values.reduce((sum, item) => sum + item.value, 0),
+    available: true,
+    recordCount: values.length,
+    note: fallbackCount > 0
+      ? `Aggregated ${values.length} Mailchimp reporting period${values.length === 1 ? "" : "s"}; ${fallbackCount} historical period${fallbackCount === 1 ? "" : "s"} used the stored rate numerator because a direct count row was not available.`
+      : `Aggregated ${values.length} direct Mailchimp count reporting period${values.length === 1 ? "" : "s"}.`
+  };
+}
+
+function selectSourceMetricRecordsForRange(
+  records: Array<NormalizedAirtableRecord<Fields>>,
+  sourceTerm: string,
+  metricKey: string,
+  range: DateRangeLike
+): { records: Array<NormalizedAirtableRecord<Fields>>; note: string } {
   const matching = records.filter((record) => {
     const source = [
       stringField(record.fields, ["Source Name"], ""),
@@ -127,16 +178,24 @@ export function aggregateSourceMetricForRange(
     return source.includes(sourceTerm.toLowerCase()) && key === metricKey.toLowerCase();
   });
 
-  if (!matching.length) return unavailableMetric("No matching KPI_History records are available.");
-  if (!range.startDate || !range.endDate) return aggregateRecords(matching, "Aggregated all available KPI_History records.");
+  if (!matching.length) {
+    return { records: [], note: "No matching KPI_History records are available." };
+  }
+
+  if (!range.startDate || !range.endDate) {
+    const canonical = preferCanonicalRecords(matching);
+    return { records: canonical, note: "Aggregated all available non-overlapping KPI_History records." };
+  }
 
   const exact = matching.filter((record) => {
     const period = recordPeriod(record);
     return period.start === range.startDate && period.end === range.endDate;
   });
   if (exact.length) {
-    const preferred = preferCanonicalRecords(exact);
-    return aggregateRecords(preferred, "Used the KPI_History reporting period that exactly matches the selected range.");
+    return {
+      records: preferCanonicalRecords(exact),
+      note: "Used the KPI_History reporting period that exactly matches the selected range."
+    };
   }
 
   const contained = matching.filter((record) => {
@@ -144,14 +203,14 @@ export function aggregateSourceMetricForRange(
     return Boolean(period.start && period.end && period.start >= range.startDate! && period.end <= range.endDate!);
   });
   if (!contained.length) {
-    return unavailableMetric("No complete KPI_History reporting periods fall inside the selected range.");
+    return { records: [], note: "No complete KPI_History reporting periods fall inside the selected range." };
   }
 
   const canonical = preferCanonicalRecords(contained);
-  return aggregateRecords(
-    canonical,
-    `Aggregated ${canonical.length} non-overlapping KPI_History reporting period${canonical.length === 1 ? "" : "s"} fully contained in the selected range.`
-  );
+  return {
+    records: canonical,
+    note: `Aggregated ${canonical.length} non-overlapping KPI_History reporting period${canonical.length === 1 ? "" : "s"} fully contained in the selected range.`
+  };
 }
 
 function preferCanonicalRecords(records: Array<NormalizedAirtableRecord<Fields>>): Array<NormalizedAirtableRecord<Fields>> {
