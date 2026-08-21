@@ -52,6 +52,7 @@ async function patchQuarterlyTopContent() {
 
     document.querySelector("#quarterly-content-quarter")?.addEventListener("change", (event) => {
       selectedQuarter = event.target.value;
+      quarterlyTablesPromise = undefined;
       document.querySelector("#quarterly-top-content-view")?.remove();
       void patchQuarterlyTopContent();
     });
@@ -133,17 +134,19 @@ function buildNewsletterItems(records, range) {
       return {
         title: String(fields["Content Title"] ?? "Untitled newsletter"),
         date,
-        score: clickRate,
-        secondaryScore: openRate,
-        tertiaryScore: sent,
+        score: clicks,
+        secondaryScore: clickRate,
+        tertiaryScore: openRate,
+        volume: sent,
         meta: `Sent ${formatQuarterlyNumber(sent)} · Open ${formatQuarterlyPercent(openRate)} · Clicks ${formatQuarterlyNumber(clicks)} · Click rate ${formatQuarterlyPercent(clickRate)}`,
-        scoreDisplay: formatQuarterlyPercent(clickRate)
+        scoreDisplay: `${formatQuarterlyNumber(clicks)} clicks`
       };
     })
     .sort((left, right) =>
       right.score - left.score ||
       right.secondaryScore - left.secondaryScore ||
-      right.tertiaryScore - left.tertiaryScore
+      right.tertiaryScore - left.tertiaryScore ||
+      right.volume - left.volume
     );
 }
 
@@ -157,12 +160,10 @@ function buildSocialItems(records, channel, range) {
     const date = String(fields["Metric Date"] ?? fields.Date ?? "");
     if (!dateInRange(date, range)) continue;
 
-    const sourceId = bufferSourceId(fields);
-    if (!sourceId) continue;
-
-    const post = posts.get(sourceId) ?? {
-      id: sourceId,
-      title: String(fields["Content Title"] ?? "Untitled social post"),
+    const title = String(fields["Content Title"] ?? "Untitled social post");
+    const key = `${normalizeKey(title)}|${date}`;
+    const post = posts.get(key) ?? {
+      title,
       date,
       metrics: new Map()
     };
@@ -171,7 +172,7 @@ function buildSocialItems(records, channel, range) {
     if (metricName) {
       post.metrics.set(metricName, Math.max(value, post.metrics.get(metricName) ?? 0));
     }
-    posts.set(sourceId, post);
+    posts.set(key, post);
   }
 
   return [...posts.values()]
@@ -193,35 +194,13 @@ function toRankedSocialItem(post) {
   const reach = firstMetric(metrics, ["reach"]);
   const exposure = Math.max(impressions, views, reach);
 
-  if (engagementRate > 0) {
-    return {
-      title: post.title,
-      date: post.date,
-      score: engagementRate,
-      exposure,
-      scoreDisplay: formatQuarterlyPercent(engagementRate),
-      meta: `Engagement rate ${formatQuarterlyPercent(engagementRate)}${interactions ? ` · ${formatQuarterlyNumber(interactions)} interactions` : ""}${exposure ? ` · ${formatQuarterlyNumber(exposure)} reach/views` : ""}`
-    };
-  }
-
-  if (interactions > 0) {
-    return {
-      title: post.title,
-      date: post.date,
-      score: interactions,
-      exposure,
-      scoreDisplay: formatQuarterlyNumber(interactions),
-      meta: `${formatQuarterlyNumber(interactions)} interactions${clicks ? ` · ${formatQuarterlyNumber(clicks)} clicks` : ""}${reactions ? ` · ${formatQuarterlyNumber(reactions)} reactions` : ""}${comments ? ` · ${formatQuarterlyNumber(comments)} comments` : ""}${shares ? ` · ${formatQuarterlyNumber(shares)} shares` : ""}`
-    };
-  }
-
   return {
     title: post.title,
     date: post.date,
-    score: exposure,
+    score: engagementRate,
     exposure,
-    scoreDisplay: formatQuarterlyNumber(exposure),
-    meta: `${formatQuarterlyNumber(exposure)} ${views >= impressions && views >= reach ? "views" : impressions >= reach ? "impressions" : "reach"}`
+    scoreDisplay: formatQuarterlyPercent(engagementRate),
+    meta: `Engagement rate ${formatQuarterlyPercent(engagementRate)}${interactions ? ` · ${formatQuarterlyNumber(interactions)} interactions` : ""}${exposure ? ` · ${formatQuarterlyNumber(exposure)} reach/views` : ""}`
   };
 }
 
@@ -251,20 +230,6 @@ function renderQuarterlyCard(item, index) {
       <div class="score">${escapeQuarterlyHtml(scoreDisplay)}</div>
     </article>
   `;
-}
-
-function bufferSourceId(fields) {
-  try {
-    const dimensions = typeof fields.Dimensions === "string" ? JSON.parse(fields.Dimensions) : fields.Dimensions;
-    if (dimensions?.sourceRecordId) return String(dimensions.sourceRecordId);
-  } catch {}
-
-  const raw = String(fields["Source Record ID"] ?? "");
-  if (!raw) return "";
-  const metricName = String(fields["Metric Name"] ?? "").toLowerCase();
-  const marker = metricName ? `:${metricName}:` : "";
-  const markerIndex = marker ? raw.toLowerCase().indexOf(marker) : -1;
-  return markerIndex > 0 ? raw.slice(0, markerIndex) : raw;
 }
 
 function firstMetric(metrics, names) {
