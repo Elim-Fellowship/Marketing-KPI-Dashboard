@@ -46,8 +46,9 @@ export class CastosImportConnector extends BaseConnector {
       }
       seenPeriods.add(periodKey);
 
-      const rows = parseListens(file.csv);
+      const rows = aggregateEpisodeRows(parseListens(file.csv));
       const totalListens = rows.reduce((sum, row) => sum + row.listens, 0);
+
       metrics.push({
         sourceRecordId: `castos:listens:${range.start}:${range.end}`,
         metricName: "castos_listens",
@@ -60,15 +61,62 @@ export class CastosImportConnector extends BaseConnector {
         activityVolume: totalListens,
         dimensions: { periodStart: range.start, periodEnd: range.end, periodType: "monthly", rowCount: rows.length, fileName: file.name }
       });
+
+      for (const row of rows) {
+        const sourceRecordId = episodeSourceRecordId(range, row);
+        metrics.push({
+          sourceRecordId,
+          metricName: "castos_episode_listens",
+          value: row.listens,
+          unit: "count",
+          date: row.publishedDate,
+          targetTableKey: "contentPerformance",
+          platform: "Podcast",
+          channel: "Podcast",
+          contentTitle: row.episode,
+          contentType: "Episode",
+          activityVolume: row.listens,
+          dimensions: {
+            periodStart: range.start,
+            periodEnd: range.end,
+            reportingPeriod: reportingMonth(range.end),
+            podcast: row.podcast,
+            fileName: file.name
+          }
+        });
+      }
     }
 
-    return metrics.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    return metrics.sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.sourceRecordId.localeCompare(b.sourceRecordId));
   }
 
   override async transformData(metrics: RawConnectorMetric[]): Promise<ConnectorAirtablePayload> {
     return {
       metrics: [],
       records: metrics.map((metricRow) => {
+        if (metricRow.targetTableKey === "contentPerformance") {
+          const periodStart = String(metricRow.dimensions?.periodStart ?? "");
+          const periodEnd = String(metricRow.dimensions?.periodEnd ?? "");
+          const podcast = String(metricRow.dimensions?.podcast ?? "");
+          const fields: AirtableFields = {
+            Platform: "Podcast",
+            "Content Title": metricRow.contentTitle ?? "Untitled episode",
+            "Content Type": "Episode",
+            "Publish Date": metricRow.date,
+            "Metric Label": "Listens",
+            "Metric Value": metricRow.value,
+            "Source Platform": "Castos",
+            "Source Record ID": metricRow.sourceRecordId,
+            "Reporting Period": String(metricRow.dimensions?.reportingPeriod ?? reportingMonth(periodEnd)),
+            Notes: `Castos listens reported for ${periodStart} to ${periodEnd}${podcast ? `; podcast: ${podcast}` : ""}.`
+          };
+          return {
+            tableKey: "contentPerformance" as const,
+            uniqueKey: { fieldName: "Source Record ID", value: metricRow.sourceRecordId },
+            fields
+          };
+        }
+
         const periodStart = String(metricRow.dimensions?.periodStart ?? metricRow.date);
         const periodEnd = String(metricRow.dimensions?.periodEnd ?? metricRow.date);
         const uniqueKey = `castos|${metricRow.metricName}|${periodStart}|${periodEnd}`;
@@ -98,15 +146,18 @@ export class CastosImportConnector extends BaseConnector {
   }
 
   override async writeToAirtable(payload: ConnectorAirtablePayload, context: ConnectorRunContext): Promise<ConnectorWriteResult> {
-    const tableName = context.config.airtable.tables.kpiHistory;
     let created = 0;
     let updated = 0;
     let skipped = 0;
 
     for (const record of payload.records) {
-      const uniqueKey = String(record.fields["Unique Key"] ?? "");
-      const current = await context.airtable.findOneByField(tableName, "Unique Key", uniqueKey);
-      if (current && fieldsMatch(current.fields, record.fields)) { skipped += 1; continue; }
+      const tableName = context.config.airtable.tables[record.tableKey];
+      const uniqueKey = String(record.uniqueKey.value ?? "");
+      const current = await context.airtable.findOneByField(tableName, record.uniqueKey.fieldName, uniqueKey);
+      const comparisonFields = record.tableKey === "contentPerformance"
+        ? ["Platform", "Content Title", "Content Type", "Publish Date", "Metric Label", "Metric Value", "Source Platform", "Source Record ID", "Reporting Period", "Notes"]
+        : ["Metric Key", "Value", "Unit", "Date", "Snapshot Date", "Period Start", "Period End", "Source Record ID"];
+      if (current && fieldsMatch(current.fields, record.fields, comparisonFields)) { skipped += 1; continue; }
       if (context.dryRun) { skipped += 1; continue; }
       if (current) { await context.airtable.updateRecord(tableName, current.id, record.fields); updated += 1; }
       else { await context.airtable.createRecord(tableName, record.fields); created += 1; }
@@ -120,6 +171,7 @@ export class CastosImportConnector extends BaseConnector {
 
 type FileBundle = { files: Array<{ name: string; csv: string }> };
 type DateRange = { start: string; end: string };
+type EpisodeRow = { publishedDate: string; podcast: string; episode: string; listens: number };
 
 function parseBundle(value: string): FileBundle {
   try {
@@ -129,7 +181,7 @@ function parseBundle(value: string): FileBundle {
   return { files: [{ name: "castos.csv", csv: value }] };
 }
 function detectType(csv: string): "listens" | "unknown" { const header = parseCsv(csv)[0]?.map(normalizeHeader) ?? []; return ["published date", "podcast", "episode", "listens"].every((column) => header.includes(column)) ? "listens" : "unknown"; }
-function parseListens(csv: string) {
+function parseListens(csv: string): EpisodeRow[] {
   const rows = parseCsv(csv).filter((row) => row.some((cell) => cell.trim()));
   const headers = rows[0]?.map(normalizeHeader) ?? [];
   const indexes = { publishedDate: find(headers, ["published date"]), podcast: find(headers, ["podcast"]), episode: find(headers, ["episode"]), listens: find(headers, ["listens"]) };
@@ -138,6 +190,19 @@ function parseListens(csv: string) {
   if (!parsed.length) throw new AppError("VALIDATION_FAILED", "The Castos Listens export contains no data rows.");
   if (parsed.some((row) => !row.podcast || !row.episode)) throw new AppError("VALIDATION_FAILED", "The Castos Listens export contains a row with a missing podcast or episode name.");
   return parsed;
+}
+function aggregateEpisodeRows(rows: EpisodeRow[]): EpisodeRow[] {
+  const grouped = new Map<string, EpisodeRow>();
+  for (const row of rows) {
+    const key = `${row.publishedDate}|${row.podcast.trim().toLowerCase()}|${row.episode.trim().toLowerCase()}`;
+    const current = grouped.get(key);
+    if (current) current.listens += row.listens;
+    else grouped.set(key, { ...row });
+  }
+  return [...grouped.values()];
+}
+function episodeSourceRecordId(range: DateRange, row: EpisodeRow): string {
+  return `castos:episode:${range.start}:${range.end}:${row.publishedDate}:${encodeURIComponent(row.podcast)}:${encodeURIComponent(row.episode)}`;
 }
 function parseFilenameRange(name: string): DateRange | undefined {
   const match = /castos-listens-(\d{4})-(\d{2})-(\d{2})-to-(\d{4})-(\d{2})-(\d{2})(?:-[^.]+)?\.csv$/i.exec(name);
@@ -152,7 +217,7 @@ function isFullCalendarMonth(range: DateRange): boolean {
   return Number(endMatch[3]) === lastDay;
 }
 function reportingMonth(date: string) { const match = /^(\d{4})-(\d{2})/.exec(date); return match ? `${match[1]}-${match[2]}` : ""; }
-function fieldsMatch(existing: Record<string, unknown>, incoming: AirtableFields) { return ["Metric Key", "Value", "Unit", "Date", "Snapshot Date", "Period Start", "Period End", "Source Record ID"].every((field) => String(existing[field] ?? "") === String(incoming[field] ?? "")); }
+function fieldsMatch(existing: Record<string, unknown>, incoming: AirtableFields, fields: string[]) { return fields.every((field) => String(existing[field] ?? "") === String(incoming[field] ?? "")); }
 function parseCsv(csv: string): string[][] { const rows:string[][]=[];let row:string[]=[];let cell="";let quoted=false;for(let i=0;i<csv.length;i+=1){const c=csv[i],n=csv[i+1];if(c==='"'){if(quoted&&n==='"'){cell+='"';i+=1}else quoted=!quoted}else if(c===","&&!quoted){row.push(cell);cell=""}else if((c==="\n"||c==="\r")&&!quoted){if(c==="\r"&&n==="\n")i+=1;row.push(cell);rows.push(row);row=[];cell=""}else cell+=c}if(cell.length||row.length){row.push(cell);rows.push(row)}return rows; }
 function normalizeHeader(value: string) { return value.replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " "); }
 function find(headers: string[], aliases: string[]) { return headers.findIndex((header) => aliases.includes(header)); }
