@@ -10,6 +10,7 @@ import type {
 } from "./types.js";
 
 const ELIM_YOUTUBE_CHANNEL_ID = "UCGRjTp3nEHMiJ3-UQgRN0Qw";
+const YOUTUBE_HISTORY_START_DATE = "2026-01-01";
 
 interface ReportingPeriod {
   startDate: string;
@@ -25,62 +26,14 @@ interface MetricDefinition {
 }
 
 const METRICS: MetricDefinition[] = [
-  {
-    key: "youtube_videos_published",
-    name: "Videos Published",
-    unit: "videos",
-    value: (period) => period.videosPublished,
-    aggregationMethod: "Sum"
-  },
-  {
-    key: "youtube_views",
-    name: "YouTube Views",
-    unit: "views",
-    value: (period) => period.views,
-    aggregationMethod: "Sum"
-  },
-  {
-    key: "youtube_watch_minutes",
-    name: "YouTube Watch Time Minutes",
-    unit: "minutes",
-    value: (period) => period.estimatedMinutesWatched,
-    aggregationMethod: "Sum"
-  },
-  {
-    key: "youtube_average_view_duration_seconds",
-    name: "YouTube Average View Duration",
-    unit: "seconds",
-    value: (period) => period.averageViewDurationSeconds,
-    aggregationMethod: "Average"
-  },
-  {
-    key: "youtube_likes",
-    name: "YouTube Likes",
-    unit: "likes",
-    value: (period) => period.likes,
-    aggregationMethod: "Sum"
-  },
-  {
-    key: "youtube_comments",
-    name: "YouTube Comments",
-    unit: "comments",
-    value: (period) => period.comments,
-    aggregationMethod: "Sum"
-  },
-  {
-    key: "youtube_subscribers_gained",
-    name: "YouTube Subscribers Gained",
-    unit: "subscribers",
-    value: (period) => period.subscribersGained,
-    aggregationMethod: "Sum"
-  },
-  {
-    key: "youtube_subscribers_lost",
-    name: "YouTube Subscribers Lost",
-    unit: "subscribers",
-    value: (period) => period.subscribersLost,
-    aggregationMethod: "Sum"
-  }
+  { key: "youtube_videos_published", name: "Videos Published", unit: "videos", value: (period) => period.videosPublished, aggregationMethod: "Sum" },
+  { key: "youtube_views", name: "YouTube Views", unit: "views", value: (period) => period.views, aggregationMethod: "Sum" },
+  { key: "youtube_watch_minutes", name: "YouTube Watch Time Minutes", unit: "minutes", value: (period) => period.estimatedMinutesWatched, aggregationMethod: "Sum" },
+  { key: "youtube_average_view_duration_seconds", name: "YouTube Average View Duration", unit: "seconds", value: (period) => period.averageViewDurationSeconds, aggregationMethod: "Average" },
+  { key: "youtube_likes", name: "YouTube Likes", unit: "likes", value: (period) => period.likes, aggregationMethod: "Sum" },
+  { key: "youtube_comments", name: "YouTube Comments", unit: "comments", value: (period) => period.comments, aggregationMethod: "Sum" },
+  { key: "youtube_subscribers_gained", name: "YouTube Subscribers Gained", unit: "subscribers", value: (period) => period.subscribersGained, aggregationMethod: "Sum" },
+  { key: "youtube_subscribers_lost", name: "YouTube Subscribers Lost", unit: "subscribers", value: (period) => period.subscribersLost, aggregationMethod: "Sum" }
 ];
 
 export class YouTubeConnector extends BaseConnector {
@@ -95,46 +48,29 @@ export class YouTubeConnector extends BaseConnector {
   };
 
   async authenticate(context: ConnectorRunContext): Promise<ConnectorAuthResult> {
-    if (!context.config.youtube.configured) {
-      return { ok: false, status: "Needs Setup", message: "Missing YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_SECRET" };
-    }
-    if (!context.config.youtube.refreshToken) {
-      return { ok: false, status: "Needs Setup", message: "Missing YOUTUBE_REFRESH_TOKEN" };
-    }
-
+    if (!context.config.youtube.configured) return { ok: false, status: "Needs Setup", message: "Missing YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_SECRET" };
+    if (!context.config.youtube.refreshToken) return { ok: false, status: "Needs Setup", message: "Missing YOUTUBE_REFRESH_TOKEN" };
     try {
       const channel = await new YouTubeService(context.config).getAuthorizedChannel();
       if (channel.id !== ELIM_YOUTUBE_CHANNEL_ID) {
-        return {
-          ok: false,
-          status: "Error",
-          message: `YouTube OAuth resolved to ${channel.title} (${channel.id}) instead of the configured Elim Fellowship channel.`
-        };
+        return { ok: false, status: "Error", message: `YouTube OAuth resolved to ${channel.title} (${channel.id}) instead of the configured Elim Fellowship channel.` };
       }
-      return {
-        ok: true,
-        status: "Connected",
-        message: `YouTube API authenticated for ${channel.title}.`
-      };
+      return { ok: true, status: "Connected", message: `YouTube API authenticated for ${channel.title}.` };
     } catch (error) {
-      return {
-        ok: false,
-        status: "Error",
-        message: `YouTube authentication failed: ${error instanceof Error ? error.message : String(error)}`
-      };
+      return { ok: false, status: "Error", message: `YouTube authentication failed: ${error instanceof Error ? error.message : String(error)}` };
     }
   }
 
   async fetchMetrics(context: ConnectorRunContext): Promise<RawConnectorMetric[]> {
     const service = new YouTubeService(context.config);
-    const periods = buildRollingMonthlyPeriods(new Date());
+    const periods = buildMonthlyPeriodsFrom(YOUTUBE_HISTORY_START_DATE, new Date());
     const rawMetrics: RawConnectorMetric[] = [];
+
+    context.logger.info("YouTube history window", { historyStartDate: YOUTUBE_HISTORY_START_DATE, periodCount: periods.length });
 
     for (const period of periods) {
       const result = await service.fetchPeriodMetrics(period.startDate, period.endDate);
-      if (result.channel.id !== ELIM_YOUTUBE_CHANNEL_ID) {
-        throw new Error(`YouTube sync resolved to unexpected channel ${result.channel.title} (${result.channel.id}).`);
-      }
+      if (result.channel.id !== ELIM_YOUTUBE_CHANNEL_ID) throw new Error(`YouTube sync resolved to unexpected channel ${result.channel.title} (${result.channel.id}).`);
 
       for (const definition of METRICS) {
         rawMetrics.push({
@@ -175,7 +111,6 @@ export class YouTubeConnector extends BaseConnector {
   async transformData(metrics: RawConnectorMetric[], _context: ConnectorRunContext): Promise<ConnectorAirtablePayload> {
     const normalized = metrics.map((metric) => this.normalizeMetric(metric));
     const syncedAt = new Date().toISOString();
-
     return {
       metrics: normalized,
       records: normalized.map((metric) => {
@@ -206,39 +141,34 @@ export class YouTubeConnector extends BaseConnector {
           "Source Record ID": `youtube:${metricKey}:${periodStart}:${periodEnd}`,
           "Last Synced At": syncedAt
         };
-
-        return {
-          tableKey: "kpiHistory" as const,
-          uniqueKey: { fieldName: "Unique Key", value: uniqueKey },
-          fields
-        };
+        return { tableKey: "kpiHistory" as const, uniqueKey: { fieldName: "Unique Key", value: uniqueKey }, fields };
       })
     };
   }
 
-  protected async getMockMetrics(_context: ConnectorRunContext): Promise<RawConnectorMetric[]> {
-    return [];
-  }
+  protected async getMockMetrics(_context: ConnectorRunContext): Promise<RawConnectorMetric[]> { return []; }
 }
 
-function buildRollingMonthlyPeriods(now: Date): ReportingPeriod[] {
-  const currentYear = now.getUTCFullYear();
-  const currentMonth = now.getUTCMonth();
+function buildMonthlyPeriodsFrom(startDate: string, now: Date): ReportingPeriod[] {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  if (!Number.isFinite(start.getTime())) throw new Error(`Invalid YouTube history start date: ${startDate}`);
+
   const today = formatDate(now);
+  const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
   const periods: ReportingPeriod[] = [];
 
-  for (let monthsBack = 2; monthsBack >= 0; monthsBack -= 1) {
-    const start = new Date(Date.UTC(currentYear, currentMonth - monthsBack, 1));
-    const isCurrentMonth = monthsBack === 0;
-    const end = isCurrentMonth
+  while (cursor <= currentMonthStart) {
+    const monthStart = new Date(cursor);
+    const isCurrentMonth = monthStart.getUTCFullYear() === now.getUTCFullYear() && monthStart.getUTCMonth() === now.getUTCMonth();
+    const monthEnd = isCurrentMonth
       ? today
-      : formatDate(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)));
-    periods.push({ startDate: formatDate(start), endDate: end });
+      : formatDate(new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)));
+    periods.push({ startDate: formatDate(monthStart), endDate: monthEnd });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
   }
 
   return periods;
 }
 
-function formatDate(value: Date): string {
-  return value.toISOString().slice(0, 10);
-}
+function formatDate(value: Date): string { return value.toISOString().slice(0, 10); }
