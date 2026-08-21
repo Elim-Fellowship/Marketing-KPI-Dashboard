@@ -11,10 +11,15 @@ function applyChannelActivityLabels() {
     if (!channelName || !volumeLabel) return;
 
     const label = labels[channelName];
-    if (label) volumeLabel.textContent = label;
+    if (label && volumeLabel.textContent !== label) {
+      volumeLabel.textContent = label;
+    }
   });
 }
 
-const observer = new MutationObserver(applyChannelActivityLabels);
-observer.observe(document.querySelector("#page-root"), { childList: true, subtree: true });
+const pageRoot = document.querySelector("#page-root");
+if (pageRoot) {
+  const observer = new MutationObserver(applyChannelActivityLabels);
+  observer.observe(pageRoot, { childList: true, subtree: true });
+}
 applyChannelActivityLabels();
