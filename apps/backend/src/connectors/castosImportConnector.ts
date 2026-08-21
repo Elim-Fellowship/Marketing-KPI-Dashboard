@@ -105,6 +105,7 @@ export class CastosImportConnector extends BaseConnector {
             "Publish Date": metricRow.date,
             "Metric Label": "Listens",
             "Metric Value": metricRow.value,
+            "Source Name": "Castos",
             "Source Platform": "Castos",
             "Source Record ID": metricRow.sourceRecordId,
             "Reporting Period": String(metricRow.dimensions?.reportingPeriod ?? reportingMonth(periodEnd)),
@@ -155,7 +156,7 @@ export class CastosImportConnector extends BaseConnector {
       const uniqueKey = String(record.uniqueKey.value ?? "");
       const current = await context.airtable.findOneByField(tableName, record.uniqueKey.fieldName, uniqueKey);
       const comparisonFields = record.tableKey === "contentPerformance"
-        ? ["Platform", "Content Title", "Content Type", "Publish Date", "Metric Label", "Metric Value", "Source Platform", "Source Record ID", "Reporting Period", "Notes"]
+        ? ["Platform", "Content Title", "Content Type", "Publish Date", "Metric Label", "Metric Value", "Source Name", "Source Platform", "Source Record ID", "Reporting Period", "Notes"]
         : ["Metric Key", "Value", "Unit", "Date", "Snapshot Date", "Period Start", "Period End", "Source Record ID"];
       if (current && fieldsMatch(current.fields, record.fields, comparisonFields)) { skipped += 1; continue; }
       if (context.dryRun) { skipped += 1; continue; }
