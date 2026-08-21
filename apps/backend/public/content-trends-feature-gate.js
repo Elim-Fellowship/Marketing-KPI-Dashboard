@@ -9,9 +9,6 @@ const CONTENT_TREND_PERIODS = {
   all: { label: "All" }
 };
 
-// Phase-one health definitions intentionally use the engagement signal currently
-// returned by the normalized Channel Breakdown backend. This makes the metric
-// explicit without inventing a second calculation in the browser.
 const CONTENT_TREND_HEALTH_DEFINITIONS = {
   instagram: { label: "Likes", description: "Audience reactions to Instagram content" },
   facebook: { label: "Likes", description: "Audience reactions to Facebook content" },
@@ -59,7 +56,6 @@ function rollingTrendRange(periodKey) {
   const definition = CONTENT_TREND_PERIODS[periodKey];
   const end = new Date();
   const start = new Date(end);
-
   if (definition.days) {
     start.setDate(start.getDate() - (definition.days - 1));
   } else if (definition.months) {
@@ -69,7 +65,6 @@ function rollingTrendRange(periodKey) {
     start.setFullYear(start.getFullYear() - definition.years);
     start.setDate(start.getDate() + 1);
   }
-
   return { startDate: isoTrendDate(start), endDate: isoTrendDate(end) };
 }
 
@@ -84,23 +79,14 @@ function healthDefinition(channel) {
 }
 
 function trendStatus(channel) {
-  if (!channel?.hasData) {
-    return { key: "unavailable", arrow: "—", label: "No data", value: "—" };
-  }
-
+  if (!channel?.hasData) return { key: "unavailable", arrow: "—", label: "No data", value: "—" };
   if (channel.changePercent === undefined || channel.changePercent === null || !Number.isFinite(Number(channel.changePercent))) {
     return { key: "unavailable", arrow: "—", label: "Not enough history", value: "—" };
   }
-
   const change = Number(channel.changePercent);
   const value = `${change > 0 ? "+" : change < 0 ? "−" : ""}${Math.abs(change).toFixed(1)}%`;
-
-  if (change > CONTENT_TREND_STABLE_THRESHOLD) {
-    return { key: "up", arrow: "↑", label: "Improving", value };
-  }
-  if (change < -CONTENT_TREND_STABLE_THRESHOLD) {
-    return { key: "down", arrow: "↓", label: "Declining", value };
-  }
+  if (change > CONTENT_TREND_STABLE_THRESHOLD) return { key: "up", arrow: "↑", label: "Improving", value };
+  if (change < -CONTENT_TREND_STABLE_THRESHOLD) return { key: "down", arrow: "↓", label: "Declining", value };
   return { key: "stable", arrow: "→", label: "Stable", value };
 }
 
@@ -137,6 +123,7 @@ function trendStyles() {
     .content-trend-signal{margin-top:8px;color:#475569;font-size:12px;line-height:1.35}
     .content-trend-arrow{font-size:34px;font-weight:800;line-height:1}
     .content-trend-card-result{display:flex;align-items:baseline;gap:9px;margin-top:18px}.content-trend-card-result strong{font-size:24px;color:#0f172a}.content-trend-card-result span{font-size:13px;font-weight:700}
+    .content-trend-card-context{margin-top:7px;color:#64748b;font-size:12px;font-weight:600}
     .content-trend-up{border-top:4px solid #16803c}.content-trend-up .content-trend-arrow,.content-trend-up .content-trend-card-result span{color:#16803c}
     .content-trend-stable{border-top:4px solid #2563eb}.content-trend-stable .content-trend-arrow,.content-trend-stable .content-trend-card-result span{color:#2563eb}
     .content-trend-down{border-top:4px solid #c53030}.content-trend-down .content-trend-arrow,.content-trend-down .content-trend-card-result span{color:#c53030}
@@ -149,12 +136,22 @@ function trendStyles() {
   document.head.appendChild(style);
 }
 
+function formatTrendMetricValue(value) {
+  if (value === undefined || value === null || value === "") return "—";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(number);
+}
+
 function renderTrendCard(channel) {
-const status = backendTrendStatus(channel);  
+  const status = backendTrendStatus(channel);
   const health = {
-  label: channel.signalLabel ?? channel.metricLabel ?? "Engagement",
-  description: channel.rationale ?? "Normalized channel engagement"
-};
+    label: channel.signalLabel ?? channel.metricLabel ?? "Engagement",
+    description: channel.rationale ?? "Normalized channel engagement"
+  };
+  const currentValue = formatTrendMetricValue(channel.currentValue);
+  const previousValue = formatTrendMetricValue(channel.previousValue);
+  const hasComparisonContext = currentValue !== "—" || previousValue !== "—";
   return `
     <article class="content-trend-card content-trend-${status.key}">
       <div class="content-trend-card-header">
@@ -166,53 +163,26 @@ const status = backendTrendStatus(channel);
         <div class="content-trend-arrow" aria-hidden="true">${status.arrow}</div>
       </div>
       <div class="content-trend-card-result"><strong>${status.value}</strong><span>${status.label}</span></div>
+      ${hasComparisonContext ? `<div class="content-trend-card-context">Current: ${escapeTrendHtml(currentValue)} · Previous: ${escapeTrendHtml(previousValue)}</div>` : ""}
     </article>
   `;
 }
+
 function backendTrendStatus(channel) {
   const status = channel?.status;
-
   if (status === "improving") {
-    return {
-      key: "up",
-      arrow: channel.arrow ?? "↑",
-      label: "Improving",
-      value: Number.isFinite(Number(channel.changePercent))
-        ? `+${Math.abs(Number(channel.changePercent)).toFixed(1)}%`
-        : "—"
-    };
+    return { key: "up", arrow: channel.arrow ?? "↑", label: "Improving", value: Number.isFinite(Number(channel.changePercent)) ? `+${Math.abs(Number(channel.changePercent)).toFixed(1)}%` : "—" };
   }
-
   if (status === "declining") {
-    return {
-      key: "down",
-      arrow: channel.arrow ?? "↓",
-      label: "Declining",
-      value: Number.isFinite(Number(channel.changePercent))
-        ? `−${Math.abs(Number(channel.changePercent)).toFixed(1)}%`
-        : "—"
-    };
+    return { key: "down", arrow: channel.arrow ?? "↓", label: "Declining", value: Number.isFinite(Number(channel.changePercent)) ? `−${Math.abs(Number(channel.changePercent)).toFixed(1)}%` : "—" };
   }
-
   if (status === "stable") {
     const change = Number(channel.changePercent);
-    return {
-      key: "stable",
-      arrow: channel.arrow ?? "→",
-      label: "Stable",
-      value: Number.isFinite(change)
-        ? `${change > 0 ? "+" : change < 0 ? "−" : ""}${Math.abs(change).toFixed(1)}%`
-        : "—"
-    };
+    return { key: "stable", arrow: channel.arrow ?? "→", label: "Stable", value: Number.isFinite(change) ? `${change > 0 ? "+" : change < 0 ? "−" : ""}${Math.abs(change).toFixed(1)}%` : "—" };
   }
-
-  return {
-    key: "unavailable",
-    arrow: channel?.arrow ?? "—",
-    label: status === "no_data" ? "No data" : "Not enough history",
-    value: "—"
-  };
+  return { key: "unavailable", arrow: channel?.arrow ?? "—", label: status === "no_data" ? "No data" : "Not enough history", value: "—" };
 }
+
 function renderTrendSummary(channels = []) {
   const counts = trendStatusCounts(channels);
   return `
@@ -222,6 +192,7 @@ function renderTrendSummary(channels = []) {
     <div class="content-trend-summary-item content-trend-summary-unavailable"><span>Insufficient history</span><strong>${counts.unavailable}</strong></div>
   `;
 }
+
 function renderBackendTrendSummary(summary = {}) {
   return `
     <div class="content-trend-summary-item content-trend-summary-up"><span>Improving</span><strong>${summary.improving ?? 0}</strong></div>
@@ -230,6 +201,7 @@ function renderBackendTrendSummary(summary = {}) {
     <div class="content-trend-summary-item content-trend-summary-unavailable"><span>Insufficient history</span><strong>${(summary.insufficient_history ?? 0) + (summary.no_data ?? 0)}</strong></div>
   `;
 }
+
 function trendAnalysisShell() {
   return `
     <section class="band content-trend-analysis" id="content-trend-analysis">
@@ -262,10 +234,8 @@ function ensureContentTrendAnalysis() {
     document.querySelector("#content-trend-analysis")?.remove();
     return;
   }
-
   const legacy = legacyTrendSection();
   if (!legacy || document.querySelector("#content-trend-analysis")) return;
-
   trendStyles();
   legacy.insertAdjacentHTML("beforebegin", trendAnalysisShell());
   document.querySelectorAll("[data-content-trend-period]").forEach((button) => {
@@ -285,26 +255,24 @@ async function loadContentTrendAnalysis() {
   const summary = document.querySelector("#content-trend-summary");
   const footnote = document.querySelector("#content-trend-footnote");
   if (!grid || !summary || !footnote) return;
-
   if (contentTrendPeriod === "all") {
     summary.innerHTML = "";
     grid.innerHTML = `<div class="content-trend-all-message"><strong>Long-term health needs a dedicated baseline.</strong><span>The All view is reserved until enough historical coverage exists for a defensible long-term comparison.</span></div>`;
     footnote.textContent = "All-time classification is intentionally withheld rather than treating incomplete history as a stable trend.";
     return;
   }
-
   const requestId = ++contentTrendRequestId;
   summary.innerHTML = "";
   grid.innerHTML = `<div class="empty-state">Loading channel health...</div>`;
   footnote.textContent = `Selected ${CONTENT_TREND_PERIODS[contentTrendPeriod].label.toLowerCase()} compared with the immediately preceding equivalent period.`;
-
   try {
-   
-const response = await fetch(`/api/content-trend-analysis?period=${encodeURIComponent(contentTrendPeriod)}`);    if (!response.ok) throw new Error(`Request failed (${response.status})`);
+    const response = await fetch(`/api/content-trend-analysis?period=${encodeURIComponent(contentTrendPeriod)}`);
+    if (!response.ok) throw new Error(`Request failed (${response.status})`);
     const data = await response.json();
     if (requestId !== contentTrendRequestId) return;
     const channels = data.channels ?? [];
-summary.innerHTML = channels.length ? renderBackendTrendSummary(data.summary) : "";    grid.innerHTML = channels.length ? channels.map(renderTrendCard).join("") : `<div class="empty-state">No channel analytics are available for this timeframe.</div>`;
+    summary.innerHTML = channels.length ? renderBackendTrendSummary(data.summary) : "";
+    grid.innerHTML = channels.length ? channels.map(renderTrendCard).join("") : `<div class="empty-state">No channel analytics are available for this timeframe.</div>`;
   } catch (error) {
     if (requestId !== contentTrendRequestId) return;
     summary.innerHTML = "";
