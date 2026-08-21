@@ -282,6 +282,23 @@ export class BufferConnector extends BaseConnector {
       throw new Error(`Buffer pagination exceeded safety limit of ${BUFFER_MAX_PAGES} pages`);
     }
 
+    const validSentDates = posts
+      .map((post) => Date.parse(post.sentAt))
+      .filter((value) => Number.isFinite(value));
+    const oldestSentAt = validSentDates.length > 0
+      ? new Date(Math.min(...validSentDates)).toISOString()
+      : null;
+    const newestSentAt = validSentDates.length > 0
+      ? new Date(Math.max(...validSentDates)).toISOString()
+      : null;
+
+    context.logger.info("Buffer historical range discovered", {
+      fetchedCount: posts.length,
+      oldestSentAt,
+      newestSentAt,
+      pages: pageCount
+    });
+
     const historyStartMs = Date.parse(BUFFER_HISTORY_START_DATE);
     const eligiblePosts = posts.filter((post) => {
       const sentAtMs = Date.parse(post.sentAt);
@@ -299,6 +316,8 @@ export class BufferConnector extends BaseConnector {
       eligibleCount: eligiblePosts.length,
       pages: pageCount,
       historyStartDate: BUFFER_HISTORY_START_DATE,
+      oldestSentAt,
+      newestSentAt,
       byService: postCountsByService
     });
 
