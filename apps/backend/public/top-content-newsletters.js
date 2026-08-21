@@ -1,5 +1,4 @@
 let newsletterPatchInFlight = false;
-let newsletterCache;
 
 async function patchTopNewsletters() {
   const container = document.querySelector("#page-root .content-sections");
@@ -43,16 +42,14 @@ async function patchTopNewsletters() {
 }
 
 async function loadNewsletterRecords() {
-  if (newsletterCache) return newsletterCache;
-  const response = await fetch("/api/airtable/content-performance");
+  const response = await fetch("/api/airtable/content-performance", { cache: "no-store" });
   if (!response.ok) throw new Error("Content_Performance request failed");
   const data = await response.json();
-  newsletterCache = (data.records ?? []).filter((record) => {
+  return (data.records ?? []).filter((record) => {
     const fields = record.fields ?? {};
     return String(fields["Source Name"] ?? fields["Source Platform"] ?? "").toLowerCase() === "mailchimp" &&
       String(fields["Content Type"] ?? "").toLowerCase() === "newsletter";
   });
-  return newsletterCache;
 }
 
 function compareNewsletterRecords(left, right) {
