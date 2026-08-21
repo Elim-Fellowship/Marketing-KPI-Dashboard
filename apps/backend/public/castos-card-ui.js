@@ -12,8 +12,8 @@ const podcastCardDefinitions = {
     contentLabel: "Content Activity",
     contentNative: "Episodes tracked",
     audienceLabel: "Audience Activity",
-    audienceNative: "Plays / Streams",
-    audienceAvailable: false
+    audienceNative: "Consumption events",
+    audienceAvailable: true
   },
   castos: {
     contentLabel: "Content Activity",
