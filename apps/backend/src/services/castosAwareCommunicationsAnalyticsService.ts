@@ -112,6 +112,8 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
     const previousDateRange = (base.previousDateRange ?? {}) as DateRangeLike;
     const currentCastos = filterCastosEpisodes(contentPerformance, dateRange);
     const previousCastos = filterCastosEpisodes(contentPerformance, previousDateRange);
+    const currentCastosListens = findSourceMetric(kpiHistory, "castos", "castos_listens", dateRange);
+    const previousCastosListens = findSourceMetric(kpiHistory, "castos", "castos_listens", previousDateRange);
     const currentSpotify = filterSpotifyEpisodes(spotifyEpisodes, dateRange);
     const previousSpotify = filterSpotifyEpisodes(spotifyEpisodes, previousDateRange);
     const currentSpotifyConsumption = filterSpotifyKpiRecords(kpiHistory, "spotify_consumption_hours", dateRange);
@@ -126,7 +128,7 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
     } else {
       replaceSpotifyChannel(channels, currentSpotify, previousSpotify);
     }
-    replaceCastosChannel(channels, currentCastos, previousCastos);
+    replaceCastosChannel(channels, currentCastos, previousCastos, currentCastosListens, previousCastosListens);
     replaceEmailChannel(channels, kpiHistory, dateRange, previousDateRange);
     replaceYouTubeChannel(channels, kpiHistory, dateRange, previousDateRange);
     replaceGa4Channel(channels, kpiHistory, "website", "Website", "ga4_website_sessions", "ga4_website_page_views", dateRange, previousDateRange);
@@ -143,7 +145,7 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
       spotifyDataState: usingNormalizedSpotify
         ? { source: "KPI_History / Spotify", currentEpisodesTracked: currentSpotifyTopEpisodes.length, previousEpisodesTracked: previousSpotifyTopEpisodes.length, metric: "Consumption Hours" }
         : { source: "Spotify_Episode_Metrics", currentEpisodesPublished: currentSpotify.length, previousEpisodesPublished: previousSpotify.length, metric: "Streams" },
-      castosDataState: { activitySource: "Content_Performance", currentEpisodesPublished: currentCastos.length, previousEpisodesPublished: previousCastos.length, audienceMetricAvailable: false },
+      castosDataState: { activitySource: "Content_Performance", audienceSource: "KPI_History / Castos", currentEpisodesPublished: currentCastos.length, previousEpisodesPublished: previousCastos.length, audienceMetricAvailable: Boolean(currentCastosListens), metric: "Downloads / Listens" },
       trends: { ...(base.trends ?? {}), channels: channels.map((channel) => ({ key: channel.key, label: channel.label, color: channel.color, metricLabel: channel.metricLabel, series: channel.series ?? [] })) }
     };
   }
@@ -315,10 +317,27 @@ function buildMetricSeries(records: Array<NormalizedAirtableRecord<Fields>>): Ar
   return [...points.entries()].map(([date, value]) => ({ date, value })).sort((left, right) => left.date.localeCompare(right.date));
 }
 
-function replaceCastosChannel(channels: ChannelLike[], currentCastos: Array<NormalizedAirtableRecord<Fields>>, previousCastos: Array<NormalizedAirtableRecord<Fields>>): void {
+function replaceCastosChannel(channels: ChannelLike[], currentCastos: Array<NormalizedAirtableRecord<Fields>>, previousCastos: Array<NormalizedAirtableRecord<Fields>>, currentListens: NormalizedAirtableRecord<Fields> | undefined, previousListens: NormalizedAirtableRecord<Fields> | undefined): void {
   const index = channels.findIndex((channel) => channel.key === "castos");
   const prior = index >= 0 ? channels[index] : undefined;
-  const channel: ChannelLike = { key: "castos", label: prior?.label ?? "Castos", metricLabel: "Downloads / Listens", color: prior?.color ?? "#6d28d9", activityVolume: currentCastos.length, metricValue: 0, previousMetricValue: 0, changePercent: undefined, source: "Content_Performance", hasData: currentCastos.length > 0, metricAvailable: false, metricNote: "Audience analytics are not available from the connected Castos API.", series: [] };
+  const currentValue = currentListens ? numberField(currentListens.fields, ["Value"]) : 0;
+  const previousValue = previousListens ? numberField(previousListens.fields, ["Value"]) : 0;
+  const metricAvailable = Boolean(currentListens);
+  const channel: ChannelLike = {
+    key: "castos",
+    label: prior?.label ?? "Castos",
+    metricLabel: "Downloads / Listens",
+    color: prior?.color ?? "#6d28d9",
+    activityVolume: currentCastos.length,
+    metricValue: currentValue,
+    previousMetricValue: previousListens ? previousValue : undefined,
+    changePercent: currentListens && previousListens ? calculatePercentChange(currentValue, previousValue) : undefined,
+    source: metricAvailable ? "Content_Performance + KPI_History / Castos" : "Content_Performance",
+    hasData: currentCastos.length > 0 || metricAvailable,
+    metricAvailable,
+    metricNote: metricAvailable ? undefined : "Downloads / listens have not been imported for the selected reporting period.",
+    series: currentListens ? buildMetricSeries([currentListens]) : []
+  };
   if (index >= 0) channels[index] = channel; else channels.push(channel);
 }
 
