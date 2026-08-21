@@ -105,16 +105,14 @@ export class SpotifyImportConnector extends BaseConnector {
 
   override async writeToAirtable(payload: ConnectorAirtablePayload, context: ConnectorRunContext): Promise<ConnectorWriteResult> {
     const tableName = context.config.airtable.tables.kpiHistory;
-    const existing = await context.airtable.findRecords(tableName, { maxRecords: 1000 });
-    const byKey = new Map(existing.map((record) => [String(record.fields["Unique Key"] ?? ""), record]));
     let created = 0; let updated = 0; let skipped = 0;
     for (const record of payload.records) {
       const uniqueKey = String(record.fields["Unique Key"] ?? "");
-      const current = byKey.get(uniqueKey);
+      const current = await context.airtable.findOneByField(tableName, "Unique Key", uniqueKey);
       if (current && fieldsMatch(current.fields, record.fields)) { skipped += 1; continue; }
       if (context.dryRun) { skipped += 1; continue; }
-      if (current) { const saved = await context.airtable.updateRecord(tableName, current.id, record.fields); byKey.set(uniqueKey, saved); updated += 1; }
-      else { const saved = await context.airtable.createRecord(tableName, record.fields); byKey.set(uniqueKey, saved); created += 1; }
+      if (current) { await context.airtable.updateRecord(tableName, current.id, record.fields); updated += 1; }
+      else { await context.airtable.createRecord(tableName, record.fields); created += 1; }
     }
     return { attempted: payload.records.length, created, updated, skipped, dryRun: context.dryRun };
   }
