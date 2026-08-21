@@ -52,6 +52,9 @@ async function patchTopContentSocialSections() {
     renderSocialBand(instagramBand, "Top Instagram Posts", [], patchKey);
   } finally {
     topContentSocialPatchInFlight = false;
+    queueMicrotask(() => {
+      void patchTopContentSocialSections();
+    });
   }
 }
 
