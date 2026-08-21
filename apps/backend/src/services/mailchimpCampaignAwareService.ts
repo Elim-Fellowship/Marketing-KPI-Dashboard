@@ -71,7 +71,7 @@ export class MailchimpCampaignAwareService extends MailchimpService {
   ): Promise<{ created: number; updated: number }> {
     if (!startDate || !endDate) return { created: 0, updated: 0 };
 
-    const campaigns = await this.fetchCampaigns({
+    const campaignRange: Parameters<MailchimpService["fetchCampaigns"]>[0] = {
       periodType: "Monthly",
       periodStart: startDate,
       periodEnd: endDate,
@@ -79,7 +79,8 @@ export class MailchimpCampaignAwareService extends MailchimpService {
       reportingWeek: "",
       reportingMonth: startDate.slice(0, 7),
       weekNumber: 0
-    } as any);
+    };
+    const campaigns = await this.fetchCampaigns(campaignRange);
 
     let created = 0;
     let updated = 0;
