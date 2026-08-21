@@ -83,10 +83,11 @@ const HEALTH_SIGNALS: HealthSignalDefinition[] = [
   {
     key: "castos",
     label: "Castos",
-    signalLabel: "Downloads",
+    signalLabel: "Podcast Listens",
     aliases: ["castos"],
-    metricTerms: ["downloads", "download"],
-    rationale: "Podcast consumption measured by downloads."
+    metricTerms: ["podcast listens", "castos_listens", "listens", "listen"],
+    rationale: "Podcast consumption measured by Castos listens.",
+    preferKpiHistory: true
   },
   {
     key: "youtube",
