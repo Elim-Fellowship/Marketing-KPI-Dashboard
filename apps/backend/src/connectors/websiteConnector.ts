@@ -12,6 +12,8 @@ const PUBLICATION_CHANNELS: PublicationChannel[] = [
   { key: "elim_updates", label: "Elim Updates", url: "https://elimfellowship.org/updates" }
 ];
 
+const HISTORY_START_DATE = "2026-01-01";
+
 export class WebsiteConnector extends BaseConnector {
   readonly metadata: ConnectorMetadata = {
     id: "website", name: "Google Analytics 4 Connector", sourceName: "Google Analytics 4", category: "website", mode: "api", enabled: true,
@@ -30,7 +32,9 @@ export class WebsiteConnector extends BaseConnector {
       const entries = await discoverPublications(channel.url); publicationIndexes.set(channel.key, entries);
       context.logger.info("Publication index discovered", { channel: channel.label, sourceUrl: channel.url, publicationCount: entries.length, newestPublication: entries[0] ?? null });
     }
-    for (const period of buildRollingMonthlyPeriods(new Date())) {
+    const periods = buildHistoryMonthlyPeriods(new Date());
+    context.logger.info("GA4 history window", { historyStartDate: HISTORY_START_DATE, periodCount: periods.length });
+    for (const period of periods) {
       const result = await service.fetchPeriodMetrics(period.startDate, period.endDate);
       pushWebsiteMetricSet(metrics, result.website, period, result.propertyId);
       for (const channel of PUBLICATION_CHANNELS) {
@@ -90,7 +94,21 @@ async function discoverPublications(url: string): Promise<PublicationEntry[]> {
 function parsePublicationDate(day: string | undefined, month: string | undefined, year: string | undefined): string | undefined { if (!day || !month || !year) return undefined; const months: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 }; const monthIndex = months[month.toLowerCase()]; if (monthIndex === undefined) return undefined; return formatDate(new Date(Date.UTC(2000 + Number(year), monthIndex, Number(day)))); }
 function stripTags(value: string): string { return decodeHtml(value.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")); }
 function decodeHtml(value: string): string { return value.replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">"); }
-function buildRollingMonthlyPeriods(now: Date): ReportingPeriod[] { const currentYear = now.getUTCFullYear(); const currentMonth = now.getUTCMonth(); const today = formatDate(now); const periods: ReportingPeriod[] = []; for (let monthsBack = 2; monthsBack >= 0; monthsBack -= 1) { const start = new Date(Date.UTC(currentYear, currentMonth - monthsBack, 1)); const end = monthsBack === 0 ? today : formatDate(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0))); periods.push({ startDate: formatDate(start), endDate: end }); } return periods; }
+function buildHistoryMonthlyPeriods(now: Date): ReportingPeriod[] {
+  const historyStart = new Date(`${HISTORY_START_DATE}T00:00:00Z`);
+  const today = formatDate(now);
+  const periods: ReportingPeriod[] = [];
+  let cursor = new Date(Date.UTC(historyStart.getUTCFullYear(), historyStart.getUTCMonth(), 1));
+  const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  while (cursor <= currentMonthStart) {
+    const startDate = formatDate(cursor);
+    const isCurrentMonth = cursor.getUTCFullYear() === now.getUTCFullYear() && cursor.getUTCMonth() === now.getUTCMonth();
+    const endDate = isCurrentMonth ? today : formatDate(new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0)));
+    periods.push({ startDate, endDate });
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+  }
+  return periods;
+}
 function currentDate(): string { return new Date().toISOString().slice(0, 10); }
 function currentMonthStart(): string { const now = new Date(); return formatDate(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))); }
 function formatDate(value: Date): string { return value.toISOString().slice(0, 10); }
