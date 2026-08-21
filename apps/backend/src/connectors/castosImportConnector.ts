@@ -8,7 +8,7 @@ export class CastosImportConnector extends BaseConnector {
     id: "castos-import" as const,
     name: "Castos CSV Import",
     sourceName: "Castos",
-    description: "Imports Castos listens analytics exports",
+    description: "Imports monthly Castos listens analytics exports",
     category: "podcast" as const,
     mode: "manual" as const,
     enabled: true
@@ -34,6 +34,9 @@ export class CastosImportConnector extends BaseConnector {
     const range = parseFilenameRange(file.name);
     if (!range) {
       throw new AppError("VALIDATION_FAILED", "Could not determine the Castos reporting period from the filename. Download the report directly from Castos and do not rename it before importing.");
+    }
+    if (!isFullCalendarMonth(range)) {
+      throw new AppError("VALIDATION_FAILED", `Castos imports must cover one complete calendar month. This file covers ${range.start} to ${range.end}. Export the Listens CSV for the first through last day of one month.`);
     }
 
     const rows = parseListens(file.csv);
@@ -92,15 +95,13 @@ export class CastosImportConnector extends BaseConnector {
 
   override async writeToAirtable(payload: ConnectorAirtablePayload, context: ConnectorRunContext): Promise<ConnectorWriteResult> {
     const tableName = context.config.airtable.tables.kpiHistory;
-    const existing = await context.airtable.findRecords(tableName, { maxRecords: 1000 });
-    const byKey = new Map(existing.map((record) => [String(record.fields["Unique Key"] ?? ""), record]));
     let created = 0;
     let updated = 0;
     let skipped = 0;
 
     for (const record of payload.records) {
       const uniqueKey = String(record.fields["Unique Key"] ?? "");
-      const current = byKey.get(uniqueKey);
+      const current = await context.airtable.findOneByField(tableName, "Unique Key", uniqueKey);
       if (current && fieldsMatch(current.fields, record.fields)) {
         skipped += 1;
         continue;
@@ -110,12 +111,10 @@ export class CastosImportConnector extends BaseConnector {
         continue;
       }
       if (current) {
-        const saved = await context.airtable.updateRecord(tableName, current.id, record.fields);
-        byKey.set(uniqueKey, saved);
+        await context.airtable.updateRecord(tableName, current.id, record.fields);
         updated += 1;
       } else {
-        const saved = await context.airtable.createRecord(tableName, record.fields);
-        byKey.set(uniqueKey, saved);
+        await context.airtable.createRecord(tableName, record.fields);
         created += 1;
       }
     }
@@ -179,9 +178,20 @@ function parseFilenameRange(name: string): DateRange | undefined {
   return start && end ? { start, end } : undefined;
 }
 
+function isFullCalendarMonth(range: DateRange): boolean {
+  const startMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(range.start);
+  const endMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(range.end);
+  if (!startMatch || !endMatch) return false;
+  if (startMatch[1] !== endMatch[1] || startMatch[2] !== endMatch[2] || startMatch[3] !== "01") return false;
+  const year = Number(startMatch[1]);
+  const month = Number(startMatch[2]);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return Number(endMatch[3]) === lastDay;
+}
+
 function reportingMonth(date: string) {
   const match = /^(\d{4})-(\d{2})/.exec(date);
-  return match ? `${Number(match[2])}-${match[1]}` : "";
+  return match ? `${match[1]}-${match[2]}` : "";
 }
 
 function fieldsMatch(existing: Record<string, unknown>, incoming: AirtableFields) {
