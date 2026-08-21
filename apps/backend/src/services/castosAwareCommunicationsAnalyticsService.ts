@@ -10,9 +10,61 @@ interface DateRangeLike { startDate?: string; endDate?: string; mode?: string; }
 interface ActivityItem { value: number; available: boolean; source: string; metricKey?: string; note?: string; }
 interface EngagementAggregate { value: number; available: boolean; }
 interface SpotifyAudienceAggregate { value: number; available: boolean; matchedDays: number; series: Array<{ date: string; value: number }>; }
+interface TopContentItemLike { rank?: number; type?: string; platform?: string; sourceName?: string; [key: string]: unknown; }
+interface TopContentGroupLike { items?: TopContentItemLike[]; itemCount?: number; topItem?: TopContentItemLike; [key: string]: unknown; }
 
 export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAnalyticsService {
   constructor(config: AppConfig, private readonly liveAirtable: AirtableService) { super(config, liveAirtable); }
+
+  override async getTopContent(query: { timeframe?: string; platform?: string; groupBy?: string }): Promise<Record<string, unknown>> {
+    const base = await super.getTopContent(query) as Record<string, any>;
+    const podcasts = Array.isArray(base.sections?.podcasts) ? base.sections.podcasts as TopContentItemLike[] : [];
+    const hasCastosPodcast = podcasts.some(isCastosTopContentItem);
+    if (!hasCastosPodcast) {
+      return {
+        ...base,
+        podcastSourcePreference: {
+          authoritativeSource: "Spotify",
+          fallbackUsed: true,
+          reason: "No Castos episode-level records are available for the selected Top Content dataset."
+        }
+      };
+    }
+
+    const filteredPodcasts = rerankTopContentItems(podcasts.filter((item) => !isSpotifyPodcastItem(item)));
+    const topOverall = rerankTopContentItems(
+      (Array.isArray(base.topOverall) ? base.topOverall as TopContentItemLike[] : [])
+        .filter((item) => !isSpotifyPodcastItem(item))
+    );
+    const groups = (Array.isArray(base.groups) ? base.groups as TopContentGroupLike[] : []).map((group) => {
+      if (!Array.isArray(group.items)) return group;
+      const items = rerankTopContentItems(group.items.filter((item) => !isSpotifyPodcastItem(item)));
+      return {
+        ...group,
+        items,
+        itemCount: items.length,
+        topItem: items[0]
+      };
+    });
+    const removedSpotifyPodcastCount = podcasts.filter(isSpotifyPodcastItem).length;
+
+    return {
+      ...base,
+      sections: {
+        ...(base.sections ?? {}),
+        podcasts: filteredPodcasts
+      },
+      topOverall,
+      groups,
+      totalRankedItems: Math.max(0, Number(base.totalRankedItems ?? 0) - removedSpotifyPodcastCount),
+      podcastSourcePreference: {
+        authoritativeSource: "Castos",
+        fallbackUsed: false,
+        removedSpotifyPodcastCount,
+        reason: "Castos episode-level listens are available, so Spotify episode rows are excluded from Top Podcast and overall rankings to avoid overlapping podcast representations."
+      }
+    };
+  }
 
   override async getOverview(query: { startDate?: string; endDate?: string; dateMode?: string } = {}): Promise<Record<string, unknown>> {
     const base = await super.getOverview(query) as Record<string, any>;
@@ -152,6 +204,18 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
       trends: { ...(base.trends ?? {}), channels: channels.map((channel) => ({ key: channel.key, label: channel.label, color: channel.color, metricLabel: channel.metricLabel, series: channel.series ?? [] })) }
     };
   }
+}
+
+function isCastosTopContentItem(item: TopContentItemLike): boolean {
+  return String(item.type ?? "").toLowerCase() === "podcast" && String(item.sourceName ?? "").toLowerCase() === "castos";
+}
+
+function isSpotifyPodcastItem(item: TopContentItemLike): boolean {
+  return String(item.type ?? "").toLowerCase() === "podcast" && String(item.sourceName ?? "").toLowerCase() === "spotify";
+}
+
+function rerankTopContentItems(items: TopContentItemLike[]): TopContentItemLike[] {
+  return items.map((item, index) => ({ ...item, rank: index + 1 }));
 }
 
 function activityItem(record: NormalizedAirtableRecord<Fields> | undefined, source: string, metricKey: string): ActivityItem {
