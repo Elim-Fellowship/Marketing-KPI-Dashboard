@@ -3,23 +3,23 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Data Imports | Communications Intelligence</title>
+    <title>Data Imports | Elim Fellowship Communications Intelligence Platform</title>
     <link rel="stylesheet" href="/styles.css">
     <link rel="stylesheet" href="/data-imports.css">
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand-block"><div class="brand-mark">CI</div><div><h1>Communications Intelligence</h1><p>Airtable-powered analytics</p></div></div>
+        <div class="brand-block"><div class="brand-mark">CI</div><div><h1>Communications Intelligence</h1><p>Elim Fellowship</p></div></div>
         <nav class="nav-tabs" aria-label="Primary pages">
           <a class="nav-tab" href="/">KPI Overview</a><a class="nav-tab" href="/top-performing-content">Top Performing Content</a><a class="nav-tab" href="/channel-breakdown">Channel Breakdown</a><a class="nav-tab active" href="/data-imports.html" aria-current="page">Data Imports</a>
         </nav>
       </aside>
       <main class="main-panel">
-        <header class="topbar"><div><p class="eyebrow">Operational Data Intake</p><h2>Data Imports</h2></div><div class="status-pill" id="import-status">Ready</div></header>
+        <header class="topbar"><div><p class="eyebrow">Elim Fellowship Communications Intelligence Platform</p><h2>Data Imports</h2><p class="page-help">Upload reporting data that is not synced automatically.</p></div><div class="status-pill" id="import-status">Ready</div></header>
         <section class="page-root imports-page">
           <section class="band import-card">
-            <div class="section-row import-heading"><div><p class="eyebrow">Podcast Analytics</p><h3 class="section-title">Upload podcast analytics in batches</h3><p class="section-note">Select one month or many months at once. The system identifies the source, pairs files by reporting period, normalizes each month separately, checks duplicates, and updates Airtable in one import exercise.</p></div><span class="source-chip">KPI_History</span></div>
+            <div class="section-row import-heading"><div><p class="eyebrow">Podcast Analytics</p><h3 class="section-title">Upload podcast analytics in batches</h3><p class="section-note">Select one month or many months at once. The system identifies the source, pairs files by reporting period, normalizes each month separately, checks duplicates, and updates the analytics data in one import.</p></div></div>
             <div class="import-steps">
               <div class="import-step"><span class="step-number">1</span><div><strong>Export the reports</strong><p>Spotify: download <b>Engagement</b> and <b>Top Episodes by Consumption Time</b> for each reporting period. Castos: download one <b>Listens</b> CSV per calendar month. Castos multi-month exports cannot be split accurately because they do not include the date of each listen.</p></div></div>
               <div class="import-step"><span class="step-number">2</span><div><strong>Select all months together</strong><p>You can select any number of monthly Castos files in one batch, or all Spotify Engagement/Top Episodes pairs in one batch. Do not rename the native files.</p></div></div>
