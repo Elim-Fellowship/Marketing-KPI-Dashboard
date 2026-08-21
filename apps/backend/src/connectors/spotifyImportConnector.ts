@@ -4,40 +4,67 @@ import { BaseConnector } from "./baseConnector.js";
 import type { ConnectorAirtablePayload, ConnectorRunContext, ConnectorWriteResult, RawConnectorMetric } from "./types.js";
 
 export class SpotifyImportConnector extends BaseConnector {
-  readonly metadata = { id: "spotify" as const, name: "Spotify CSV Import", sourceName: "Spotify", description: "Imports paired Spotify for Creators analytics exports", category: "podcast" as const, mode: "manual" as const, enabled: true };
+  readonly metadata = { id: "spotify" as const, name: "Spotify CSV Import", sourceName: "Spotify", description: "Imports one or more paired Spotify for Creators analytics periods in a single batch", category: "podcast" as const, mode: "manual" as const, enabled: true };
 
   override async authenticate(context: ConnectorRunContext) {
-    return context.csv?.trim() ? { ok: true, status: "Connected" as const, message: "Spotify export bundle ready." } : { ok: false, status: "Needs Setup" as const, message: "Choose the Spotify analytics exports before importing." };
+    return context.csv?.trim() ? { ok: true, status: "Connected" as const, message: "Spotify export batch ready." } : { ok: false, status: "Needs Setup" as const, message: "Choose the Spotify analytics exports before importing." };
   }
 
   override async fetchMetrics(context: ConnectorRunContext): Promise<RawConnectorMetric[]> {
     const bundle = parseBundle(context.csv ?? "");
-    const engagement = bundle.files.find((file) => detectType(file.csv) === "engagement");
-    const topEpisodes = bundle.files.find((file) => detectType(file.csv) === "topEpisodes");
-    if (!engagement || !topEpisodes) {
-      const missing = [!engagement ? "Engagement" : "", !topEpisodes ? "Top Episodes by Consumption Time" : ""].filter(Boolean);
-      throw new AppError("VALIDATION_FAILED", `Missing required Spotify export${missing.length === 1 ? "" : "s"}: ${missing.join(" and ")}. Upload both files for the same reporting period.`);
+    if (!bundle.files.length) throw new AppError("VALIDATION_FAILED", "No Spotify CSV files were provided.");
+
+    const periods = new Map<string, { range: DateRange; engagement?: { name: string; csv: string; rows: ReturnType<typeof parseEngagement> }; topEpisodes?: { name: string; csv: string } }>();
+
+    for (const file of bundle.files) {
+      const type = detectType(file.csv);
+      if (type === "unknown") throw new AppError("VALIDATION_FAILED", `${file.name} is not a recognized Spotify Engagement or Top Episodes by Consumption Time export.`);
+
+      if (type === "engagement") {
+        const rows = parseEngagement(file.csv);
+        const range = { start: rows[0].date, end: rows[rows.length - 1].date };
+        const key = rangeKey(range);
+        const period = periods.get(key) ?? { range };
+        if (period.engagement) throw new AppError("VALIDATION_FAILED", `More than one Spotify Engagement file was supplied for ${range.start} to ${range.end}.`);
+        period.engagement = { name: file.name, csv: file.csv, rows };
+        periods.set(key, period);
+        continue;
+      }
+
+      const range = parseFilenameRange(file.name);
+      if (!range) throw new AppError("VALIDATION_FAILED", `Could not determine the reporting period from ${file.name}. Use the native Spotify Top Episodes filename without renaming it.`);
+      const key = rangeKey(range);
+      const period = periods.get(key) ?? { range };
+      if (period.topEpisodes) throw new AppError("VALIDATION_FAILED", `More than one Spotify Top Episodes file was supplied for ${range.start} to ${range.end}.`);
+      period.topEpisodes = { name: file.name, csv: file.csv };
+      periods.set(key, period);
     }
 
-    const engagementRows = parseEngagement(engagement.csv);
-    const engagementRange = { start: engagementRows[0].date, end: engagementRows[engagementRows.length - 1].date };
-    const topRange = parseFilenameRange(topEpisodes.name);
-    if (topRange && (topRange.start !== engagementRange.start || topRange.end !== engagementRange.end)) {
-      throw new AppError("VALIDATION_FAILED", `The Spotify exports cover different reporting periods. Engagement is ${engagementRange.start} to ${engagementRange.end}; Top Episodes is ${topRange.start} to ${topRange.end}.`);
-    }
-    const reportRange = topRange ?? engagementRange;
     const metrics: RawConnectorMetric[] = [];
+    const orderedPeriods = [...periods.values()].sort((a, b) => a.range.start.localeCompare(b.range.start));
+    for (const period of orderedPeriods) {
+      if (!period.engagement || !period.topEpisodes) {
+        const missing = !period.engagement ? "Engagement" : "Top Episodes by Consumption Time";
+        throw new AppError("VALIDATION_FAILED", `Missing Spotify ${missing} export for ${period.range.start} to ${period.range.end}. Select both files for every reporting period in the batch.`);
+      }
 
-    for (const row of engagementRows) {
-      metrics.push(metric("spotify_consumption_hours", row.consumptionHours, "hours", row.date, `engagement:${row.date}:consumption`, reportRange, { periodType: "daily" }));
-      metrics.push(metric("spotify_average_consumption_hours", row.averageConsumptionHours, "hours", row.date, `engagement:${row.date}:average`, reportRange, { periodType: "daily" }));
-      metrics.push(metric("spotify_comments", row.comments, "comments", row.date, `engagement:${row.date}:comments`, reportRange, { periodType: "daily" }));
-      metrics.push(metric("spotify_followers", row.followers, "followers", row.date, `engagement:${row.date}:followers`, reportRange, { periodType: "daily" }));
+      const topRange = parseFilenameRange(period.topEpisodes.name);
+      if (!topRange || topRange.start !== period.range.start || topRange.end !== period.range.end) {
+        throw new AppError("VALIDATION_FAILED", `The Spotify files for ${period.range.start} do not cover the same reporting period.`);
+      }
+
+      for (const row of period.engagement.rows) {
+        metrics.push(metric("spotify_consumption_hours", row.consumptionHours, "hours", row.date, `engagement:${row.date}:consumption`, period.range, { periodType: "daily" }));
+        metrics.push(metric("spotify_average_consumption_hours", row.averageConsumptionHours, "hours", row.date, `engagement:${row.date}:average`, period.range, { periodType: "daily" }));
+        metrics.push(metric("spotify_comments", row.comments, "comments", row.date, `engagement:${row.date}:comments`, period.range, { periodType: "daily" }));
+        metrics.push(metric("spotify_followers", row.followers, "followers", row.date, `engagement:${row.date}:followers`, period.range, { periodType: "daily" }));
+      }
+
+      for (const row of parseTopEpisodes(period.topEpisodes.csv)) {
+        metrics.push(metric("spotify_episode_consumption_hours", row.consumptionHours, "hours", period.range.end, row.episodeUri, period.range, { periodType: "monthly", episodeTitle: row.episodeTitle, publishDate: row.publishDate, activityVolume: 1 }));
+      }
     }
 
-    for (const row of parseTopEpisodes(topEpisodes.csv)) {
-      metrics.push(metric("spotify_episode_consumption_hours", row.consumptionHours, "hours", reportRange.end, row.episodeUri, reportRange, { periodType: "monthly", episodeTitle: row.episodeTitle, publishDate: row.publishDate, activityVolume: 1 }));
-    }
     return metrics;
   }
 
@@ -97,12 +124,10 @@ export class SpotifyImportConnector extends BaseConnector {
 
 type FileBundle = { files: Array<{ name: string; csv: string }> };
 type DateRange = { start: string; end: string };
-
+function rangeKey(range: DateRange) { return `${range.start}|${range.end}`; }
 function parseBundle(value: string): FileBundle {
-  try {
-    const parsed = JSON.parse(value) as FileBundle;
-    if (Array.isArray(parsed.files) && parsed.files.length) return { files: parsed.files.filter((file) => typeof file?.name === "string" && typeof file?.csv === "string") };
-  } catch { /* legacy single-file input handled below */ }
+  try { const parsed = JSON.parse(value) as FileBundle; if (Array.isArray(parsed.files) && parsed.files.length) return { files: parsed.files.filter((file) => typeof file?.name === "string" && typeof file?.csv === "string") }; }
+  catch { /* legacy single-file input handled below */ }
   return { files: [{ name: "spotify.csv", csv: value }] };
 }
 function detectType(csv: string): "engagement" | "topEpisodes" | "unknown" {
@@ -112,34 +137,23 @@ function detectType(csv: string): "engagement" | "topEpisodes" | "unknown" {
   return "unknown";
 }
 function parseEngagement(csv: string) {
-  const rows = parseCsv(csv).filter((row) => row.some((cell) => cell.trim()));
-  const headers = rows[0].map(normalizeHeader);
+  const rows = parseCsv(csv).filter((row) => row.some((cell) => cell.trim())); const headers = rows[0].map(normalizeHeader);
   const indexes = { date: find(headers, ["date"]), consumption: find(headers, ["consumption time (hours)"]), average: find(headers, ["average consumption time (hours)"]), comments: find(headers, ["comments"]), followers: find(headers, ["followers"]) };
   if (Object.values(indexes).some((index) => index < 0)) throw new AppError("VALIDATION_FAILED", "The Engagement export does not have the expected Spotify columns.");
   const parsed = rows.slice(1).map((row, index) => ({ date: requireDate(row[indexes.date], index + 2), consumptionHours: requireNumber(row[indexes.consumption], index + 2), averageConsumptionHours: requireNumber(row[indexes.average], index + 2), comments: requireNumber(row[indexes.comments], index + 2), followers: requireNumber(row[indexes.followers], index + 2) })).sort((a,b)=>a.date.localeCompare(b.date));
-  if (!parsed.length) throw new AppError("VALIDATION_FAILED", "The Engagement export contains no data rows.");
-  return parsed;
+  if (!parsed.length) throw new AppError("VALIDATION_FAILED", "The Engagement export contains no data rows."); return parsed;
 }
 function parseTopEpisodes(csv: string) {
-  const rows = parseCsv(csv).filter((row) => row.some((cell) => cell.trim()));
-  const headers = rows[0].map(normalizeHeader);
+  const rows = parseCsv(csv).filter((row) => row.some((cell) => cell.trim())); const headers = rows[0].map(normalizeHeader);
   const indexes = { title: find(headers, ["episode title"]), consumption: find(headers, ["consumption time (hours)"]), publishDate: find(headers, ["publish date"]), uri: find(headers, ["episode uri"]) };
   if (Object.values(indexes).some((index) => index < 0)) throw new AppError("VALIDATION_FAILED", "The Top Episodes export does not have the expected Spotify columns.");
   const parsed = rows.slice(1).map((row, index) => ({ episodeTitle: String(row[indexes.title] ?? "").trim(), consumptionHours: requireNumber(row[indexes.consumption], index + 2), publishDate: requireDate(row[indexes.publishDate], index + 2), episodeUri: String(row[indexes.uri] ?? "").trim() }));
-  if (parsed.some((row) => !row.episodeTitle || !row.episodeUri)) throw new AppError("VALIDATION_FAILED", "The Top Episodes export contains a row with a missing episode title or URI.");
-  return parsed;
+  if (parsed.some((row) => !row.episodeTitle || !row.episodeUri)) throw new AppError("VALIDATION_FAILED", "The Top Episodes export contains a row with a missing episode title or URI."); return parsed;
 }
-function metric(name: string, value: number, unit: string, date: string, sourceRecordId: string, range: DateRange, extra: Record<string, string | number>): RawConnectorMetric {
-  return { sourceRecordId, metricName: name, value, unit, date, targetTableKey: "kpiHistory", platform: "Spotify", channel: "Podcast", activityVolume: Number(extra.activityVolume ?? 0), dimensions: { periodStart: range.start, periodEnd: range.end, ...extra } };
-}
-function parseFilenameRange(name: string): DateRange | undefined {
-  const match = /_(\d{1,2})-(\d{1,2})-(\d{4})--(\d{1,2})-(\d{1,2})-(\d{4})\.csv$/i.exec(name);
-  if (!match) return undefined;
-  const start = dateParts(Number(match[3]), Number(match[1]), Number(match[2])); const end = dateParts(Number(match[6]), Number(match[4]), Number(match[5]));
-  return start && end ? { start, end } : undefined;
-}
+function metric(name: string, value: number, unit: string, date: string, sourceRecordId: string, range: DateRange, extra: Record<string, string | number>): RawConnectorMetric { return { sourceRecordId, metricName: name, value, unit, date, targetTableKey: "kpiHistory", platform: "Spotify", channel: "Podcast", activityVolume: Number(extra.activityVolume ?? 0), dimensions: { periodStart: range.start, periodEnd: range.end, ...extra } }; }
+function parseFilenameRange(name: string): DateRange | undefined { const match = /_(\d{1,2})-(\d{1,2})-(\d{4})--(\d{1,2})-(\d{1,2})-(\d{4})\.csv$/i.exec(name); if (!match) return undefined; const start = dateParts(Number(match[3]), Number(match[1]), Number(match[2])); const end = dateParts(Number(match[6]), Number(match[4]), Number(match[5])); return start && end ? { start, end } : undefined; }
 function metricLabel(key: string) { return ({ spotify_consumption_hours: "Consumption Time", spotify_average_consumption_hours: "Average Consumption Time", spotify_comments: "Comments", spotify_followers: "Followers" } as Record<string,string>)[key] ?? key; }
-function reportingMonth(date: string) { const [, month, year] = /^(\d{4})-(\d{2})/.exec(date) ?? []; return month && year ? `${Number(month)}-${year}` : ""; }
+function reportingMonth(date: string) { const match = /^(\d{4})-(\d{2})/.exec(date); return match ? `${match[1]}-${match[2]}` : ""; }
 function fieldsMatch(existing: Record<string, unknown>, incoming: AirtableFields) { return ["Metric Key","Value","Unit","Date","Snapshot Date","Period Start","Period End","Source Record ID"].every((field) => String(existing[field] ?? "") === String(incoming[field] ?? "")); }
 function parseCsv(csv: string): string[][] { const rows:string[][]=[];let row:string[]=[];let cell="";let quoted=false;for(let i=0;i<csv.length;i+=1){const c=csv[i],n=csv[i+1];if(c==='"'){if(quoted&&n==='"'){cell+='"';i+=1}else quoted=!quoted}else if(c===","&&!quoted){row.push(cell);cell=""}else if((c==="\n"||c==="\r")&&!quoted){if(c==="\r"&&n==="\n")i+=1;row.push(cell);rows.push(row);row=[];cell=""}else cell+=c}if(cell.length||row.length){row.push(cell);rows.push(row)}return rows; }
 function normalizeHeader(value: string) { return value.replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " "); }
