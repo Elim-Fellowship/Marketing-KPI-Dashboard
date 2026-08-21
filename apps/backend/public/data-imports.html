@@ -19,24 +19,24 @@
         <header class="topbar"><div><p class="eyebrow">Operational Data Intake</p><h2>Data Imports</h2></div><div class="status-pill" id="import-status">Ready</div></header>
         <section class="page-root imports-page">
           <section class="band import-card">
-            <div class="section-row import-heading"><div><p class="eyebrow">Spotify Podcast Analytics</p><h3 class="section-title">Upload Spotify analytics exports</h3><p class="section-note">Select both Spotify for Creators CSV exports for the same reporting period. The system identifies each file automatically, validates the pair, normalizes the metrics, checks duplicates, and updates Airtable.</p></div><span class="source-chip">KPI_History</span></div>
+            <div class="section-row import-heading"><div><p class="eyebrow">Podcast Analytics</p><h3 class="section-title">Upload monthly podcast analytics</h3><p class="section-note">Drop the native Spotify or Castos CSV export files here. The system identifies the source automatically, validates the reporting period, normalizes the metrics, checks duplicates, and updates Airtable.</p></div><span class="source-chip">KPI_History</span></div>
             <div class="import-steps">
-              <div class="import-step"><span class="step-number">1</span><div><strong>Export two files</strong><p>From Spotify for Creators, download <b>Engagement</b> and <b>Top Episodes by Consumption Time</b> for the same date range.</p></div></div>
-              <div class="import-step"><span class="step-number">2</span><div><strong>Select both CSVs</strong><p>Drag both files here at once, or browse and multi-select them. Do not edit the files first.</p></div></div>
-              <div class="import-step"><span class="step-number">3</span><div><strong>Import</strong><p>The importer detects the file types from their headers and tells you exactly what is missing if the pair is incomplete.</p></div></div>
+              <div class="import-step"><span class="step-number">1</span><div><strong>Export the monthly report</strong><p>Spotify: download <b>Engagement</b> and <b>Top Episodes by Consumption Time</b> for the same date range. Castos: download the <b>Listens</b> CSV for the reporting month.</p></div></div>
+              <div class="import-step"><span class="step-number">2</span><div><strong>Select the native CSV file(s)</strong><p>For Spotify, select both files at once. For Castos, select the single Listens CSV. Do not rename or edit the files first.</p></div></div>
+              <div class="import-step"><span class="step-number">3</span><div><strong>Import</strong><p>The importer detects Spotify or Castos automatically and reports exactly what is missing or invalid before any Airtable write.</p></div></div>
             </div>
-            <label class="drop-zone" id="drop-zone" for="spotify-file">
-              <input id="spotify-file" type="file" accept=".csv,text/csv" multiple hidden>
-              <span class="drop-title">Drop both Spotify CSV files here</span><span class="drop-copy">or click to browse and select both</span><span class="selected-file" id="selected-file">No files selected</span>
+            <label class="drop-zone" id="drop-zone" for="podcast-file">
+              <input id="podcast-file" type="file" accept=".csv,text/csv" multiple hidden>
+              <span class="drop-title">Drop podcast analytics CSV files here</span><span class="drop-copy">or click to browse</span><span class="selected-file" id="selected-file">No files selected</span>
             </label>
-            <div id="file-detection" class="section-note">Required: Engagement + Top Episodes by Consumption Time.</div>
+            <div id="file-detection" class="section-note">Supported: Spotify Engagement + Top Episodes, or one Castos Listens CSV.</div>
             <div class="import-controls">
-              <label class="access-key-field">Staff PIN<input id="import-key" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="Enter 6-digit PIN"><span>The PIN is kept only for this browser session and is used only for Spotify data imports.</span></label>
-              <button id="import-button" class="primary-action" type="button" disabled>Import Spotify Data</button>
+              <label class="access-key-field">Staff PIN<input id="import-key" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="Enter 6-digit PIN"><span>The same staff PIN is used for all podcast data imports and is kept only for this browser session.</span></label>
+              <button id="import-button" class="primary-action" type="button" disabled>Import Podcast Data</button>
             </div>
             <div id="import-result" class="import-result" hidden></div>
           </section>
-          <section class="band"><div class="section-row"><div><p class="eyebrow">This server session</p><h3 class="section-title">Recent Spotify imports</h3></div><button id="refresh-history" class="secondary-action" type="button">Refresh</button></div><div id="import-history" class="import-history"><div class="empty-state">Loading import history...</div></div></section>
+          <section class="band"><div class="section-row"><div><p class="eyebrow">This server session</p><h3 class="section-title">Recent podcast imports</h3></div><button id="refresh-history" class="secondary-action" type="button">Refresh</button></div><div id="import-history" class="import-history"><div class="empty-state">Loading import history...</div></div></section>
         </section>
       </main>
     </div>
