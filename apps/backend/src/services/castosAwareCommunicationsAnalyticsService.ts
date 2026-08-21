@@ -9,6 +9,7 @@ interface ChannelLike { key?: string; label?: string; metricLabel?: string; colo
 interface DateRangeLike { startDate?: string; endDate?: string; mode?: string; }
 interface ActivityItem { value: number; available: boolean; source: string; metricKey?: string; note?: string; }
 interface EngagementAggregate { value: number; available: boolean; }
+interface SpotifyAudienceAggregate { value: number; available: boolean; matchedDays: number; series: Array<{ date: string; value: number }>; }
 
 export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAnalyticsService {
   constructor(config: AppConfig, private readonly liveAirtable: AirtableService) { super(config, liveAirtable); }
@@ -118,13 +119,15 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
     const previousSpotify = filterSpotifyEpisodes(spotifyEpisodes, previousDateRange);
     const currentSpotifyConsumption = filterSpotifyKpiRecords(kpiHistory, "spotify_consumption_hours", dateRange);
     const previousSpotifyConsumption = filterSpotifyKpiRecords(kpiHistory, "spotify_consumption_hours", previousDateRange);
+    const currentSpotifyAverageConsumption = filterSpotifyKpiRecords(kpiHistory, "spotify_average_consumption_hours", dateRange);
+    const previousSpotifyAverageConsumption = filterSpotifyKpiRecords(kpiHistory, "spotify_average_consumption_hours", previousDateRange);
     const currentSpotifyTopEpisodes = filterSpotifyKpiRecords(kpiHistory, "spotify_episode_consumption_hours", dateRange);
     const previousSpotifyTopEpisodes = filterSpotifyKpiRecords(kpiHistory, "spotify_episode_consumption_hours", previousDateRange);
     const channels = Array.isArray(base.channels) ? [...base.channels] as ChannelLike[] : [];
 
-    const usingNormalizedSpotify = currentSpotifyConsumption.length > 0;
+    const usingNormalizedSpotify = currentSpotifyConsumption.length > 0 && currentSpotifyAverageConsumption.length > 0;
     if (usingNormalizedSpotify) {
-      replaceSpotifyConsumptionChannel(channels, currentSpotifyConsumption, previousSpotifyConsumption, currentSpotifyTopEpisodes);
+      replaceSpotifyAudienceChannel(channels, currentSpotifyConsumption, currentSpotifyAverageConsumption, previousSpotifyConsumption, previousSpotifyAverageConsumption, currentSpotifyTopEpisodes);
     } else {
       replaceSpotifyChannel(channels, currentSpotify, previousSpotify);
     }
@@ -143,7 +146,7 @@ export class CastosAwareCommunicationsAnalyticsService extends CommunicationsAna
       channels,
       summary: { ...(base.summary ?? {}), currentValue: currentTotal, previousValue: previousTotal, changePercent: comparable.length ? calculatePercentChange(currentTotal, previousTotal) : undefined, channelCount: comparable.length },
       spotifyDataState: usingNormalizedSpotify
-        ? { source: "KPI_History / Spotify", currentEpisodesTracked: currentSpotifyTopEpisodes.length, previousEpisodesTracked: previousSpotifyTopEpisodes.length, metric: "Consumption Hours" }
+        ? { source: "KPI_History / Spotify", currentEpisodesTracked: currentSpotifyTopEpisodes.length, previousEpisodesTracked: previousSpotifyTopEpisodes.length, metric: "Audience Activity", derivation: "Consumption Time / Average Consumption Time" }
         : { source: "Spotify_Episode_Metrics", currentEpisodesPublished: currentSpotify.length, previousEpisodesPublished: previousSpotify.length, metric: "Streams" },
       castosDataState: { activitySource: "Content_Performance", audienceSource: "KPI_History / Castos", currentEpisodesPublished: currentCastos.length, previousEpisodesPublished: previousCastos.length, audienceMetricAvailable: Boolean(currentCastosListens), metric: "Downloads / Listens" },
       trends: { ...(base.trends ?? {}), channels: channels.map((channel) => ({ key: channel.key, label: channel.label, color: channel.color, metricLabel: channel.metricLabel, series: channel.series ?? [] })) }
@@ -244,27 +247,56 @@ function bufferOriginalSourceRecordId(fields: Fields): string {
   return metricRowId;
 }
 
-function replaceSpotifyConsumptionChannel(channels: ChannelLike[], currentRecords: Array<NormalizedAirtableRecord<Fields>>, previousRecords: Array<NormalizedAirtableRecord<Fields>>, currentTopEpisodes: Array<NormalizedAirtableRecord<Fields>>): void {
+function replaceSpotifyAudienceChannel(channels: ChannelLike[], currentConsumption: Array<NormalizedAirtableRecord<Fields>>, currentAverage: Array<NormalizedAirtableRecord<Fields>>, previousConsumption: Array<NormalizedAirtableRecord<Fields>>, previousAverage: Array<NormalizedAirtableRecord<Fields>>, currentTopEpisodes: Array<NormalizedAirtableRecord<Fields>>): void {
   const index = channels.findIndex((channel) => channel.key === "spotify");
   const prior = index >= 0 ? channels[index] : undefined;
-  const currentHours = sumMetricValues(currentRecords);
-  const previousHours = sumMetricValues(previousRecords);
+  const currentAudience = deriveSpotifyAudienceActivity(currentConsumption, currentAverage);
+  const previousAudience = deriveSpotifyAudienceActivity(previousConsumption, previousAverage);
   const channel: ChannelLike = {
     key: "spotify",
     label: prior?.label ?? "Spotify",
-    metricLabel: "Consumption Hours",
+    metricLabel: "Audience Activity",
     color: prior?.color ?? "#1DB954",
     activityVolume: currentTopEpisodes.length,
-    metricValue: currentHours,
-    previousMetricValue: previousHours,
-    changePercent: previousHours > 0 ? calculatePercentChange(currentHours, previousHours) : undefined,
+    metricValue: currentAudience.value,
+    previousMetricValue: previousAudience.available ? previousAudience.value : undefined,
+    changePercent: currentAudience.available && previousAudience.available ? calculatePercentChange(currentAudience.value, previousAudience.value) : undefined,
     source: "KPI_History / Spotify",
-    hasData: currentRecords.length > 0,
-    metricAvailable: true,
-    metricNote: currentTopEpisodes.length > 0 ? `${currentTopEpisodes.length} top episodes tracked for the reporting period.` : undefined,
-    series: buildMetricSeries(currentRecords)
+    hasData: currentTopEpisodes.length > 0 || currentAudience.available,
+    metricAvailable: currentAudience.available,
+    metricNote: currentAudience.available ? `Derived from Consumption Time / Average Consumption Time across ${currentAudience.matchedDays} day${currentAudience.matchedDays === 1 ? "" : "s"}.` : "Spotify audience activity could not be derived for the selected reporting period.",
+    series: currentAudience.series
   };
   if (index >= 0) channels[index] = channel; else channels.push(channel);
+}
+
+function deriveSpotifyAudienceActivity(consumptionRecords: Array<NormalizedAirtableRecord<Fields>>, averageRecords: Array<NormalizedAirtableRecord<Fields>>): SpotifyAudienceAggregate {
+  const averageByDate = new Map<string, number>();
+  for (const record of averageRecords) {
+    const date = dateField(record.fields, ["Date", "Snapshot Date"]);
+    const average = numberField(record.fields, ["Value"]);
+    if (date && average > 0) averageByDate.set(date, average);
+  }
+
+  const points = new Map<string, number>();
+  for (const record of consumptionRecords) {
+    const date = dateField(record.fields, ["Date", "Snapshot Date"]);
+    if (!date) continue;
+    const consumption = numberField(record.fields, ["Value"]);
+    const average = averageByDate.get(date) ?? 0;
+    if (consumption <= 0 || average <= 0) continue;
+    const estimatedEvents = Math.round(consumption / average);
+    if (estimatedEvents <= 0) continue;
+    points.set(date, estimatedEvents);
+  }
+
+  const series = [...points.entries()].map(([date, value]) => ({ date, value })).sort((left, right) => left.date.localeCompare(right.date));
+  return {
+    value: series.reduce((sum, point) => sum + point.value, 0),
+    available: series.length > 0,
+    matchedDays: series.length,
+    series
+  };
 }
 
 function replaceSpotifyChannel(channels: ChannelLike[], currentSpotify: Array<NormalizedAirtableRecord<Fields>>, previousSpotify: Array<NormalizedAirtableRecord<Fields>>): void {
@@ -291,10 +323,6 @@ function replaceSpotifyChannel(channels: ChannelLike[], currentSpotify: Array<No
 
 function sumSpotifyStreams(records: Array<NormalizedAirtableRecord<Fields>>): number {
   return records.reduce((sum, record) => sum + numberField(record.fields, ["Total Streams", "Streams", "Plays", "Value"]), 0);
-}
-
-function sumMetricValues(records: Array<NormalizedAirtableRecord<Fields>>): number {
-  return records.reduce((sum, record) => sum + numberField(record.fields, ["Value"]), 0);
 }
 
 function buildSpotifySeries(records: Array<NormalizedAirtableRecord<Fields>>): Array<{ date: string; value: number }> {
