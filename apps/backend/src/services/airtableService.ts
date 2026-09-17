@@ -21,6 +21,8 @@ interface CacheEntry<T> {
   value: T;
 }
 
+const KPI_HISTORY_MIN_RECORDS = 5000;
+
 export class AirtableService {
   private readonly cache = new Map<string, CacheEntry<unknown>>();
 
@@ -33,14 +35,21 @@ export class AirtableService {
     tableKey: TKey,
     options: FindRecordsOptions = {}
   ): Promise<Array<NormalizedAirtableRecord<AirtableTableRecordMap[TKey]>>> {
-    const cacheKey = `${tableKey}:${JSON.stringify(options)}`;
+    // KPI_History has grown beyond the legacy 1,000-record read limit used by
+    // several analytics endpoints. A truncated read can omit newer canonical
+    // monthly rows while retaining older partial-month snapshots, causing the
+    // dashboard to report zero even though the full-period record exists.
+    const effectiveOptions: FindRecordsOptions = tableKey === "kpiHistory"
+      ? { ...options, maxRecords: Math.max(options.maxRecords ?? 0, KPI_HISTORY_MIN_RECORDS) }
+      : options;
+    const cacheKey = `${tableKey}:${JSON.stringify(effectiveOptions)}`;
     const cached = this.getCached<Array<NormalizedAirtableRecord<AirtableTableRecordMap[TKey]>>>(cacheKey);
     if (cached) {
       return cached;
     }
 
     const tableName = this.resolveTableName(tableKey);
-    const records = await this.airtable.findRecords<AirtableTableRecordMap[TKey]>(tableName, options);
+    const records = await this.airtable.findRecords<AirtableTableRecordMap[TKey]>(tableName, effectiveOptions);
     let normalized = records.map(normalizeRecord);
 
     if (tableKey === "channelPerformance") {
