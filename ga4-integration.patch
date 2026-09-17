@@ -1,0 +1,389 @@
+diff --git a/apps/backend/src/config/env.ts b/apps/backend/src/connectors/websiteConnector.ts
+index aa85e80..dedd67c 100644
+--- a/apps/backend/src/config/env.ts
++++ b/apps/backend/src/connectors/websiteConnector.ts
+@@ -1,262 +1,147 @@
+-import { existsSync, readFileSync } from "node:fs";
+-import { dirname, resolve } from "node:path";
+-import { fileURLToPath } from "node:url";
+-
+-import type { LogLevel } from "../logging/logger.js";
+-import { AppError } from "../errors.js";
+-
+-export interface AppConfig {
+-  nodeEnv: string;
+-  host: string;
+-  port: number;
+-  logLevel: LogLevel;
+-  frontendOrigin: string;
+-  syncApiKey?: string;
+-  ga4: {
+-    propertyId?: string;
+-    serviceAccountJson?: string;
+-    configured: boolean;
+-  };
+-  mailchimp: {
+-    apiKey?: string;
+-    serverPrefix?: string;
+-    audienceId?: string;
+-    apiBaseUrl?: string;
+-    configured: boolean;
+-  };
+-
+-  buffer: {
+-  accessToken?: string;
+-  apiBaseUrl?: string;
+-  organizationId?: string;
+-  configured: boolean;
+-};
+-
+-  airtable: {
+-    apiKey: string;
+-    baseId: string;
+-    apiBaseUrl: string;
+-    rateLimitMs: number;
+-    cacheTtlMs: number;
+-    tables: {
+-      kpiSources: string;
+-      kpis: string;
+-      kpiRecords: string;
+-      importJobs: string;
+-      dashboardViews: string;
+-      alerts: string;
+-      spotifyWeeklySnapshot: string;
+-      spotifyEpisodeMetrics: string;
+-      bufferPostMetrics: string;
+-      contentPerformance: string;
+-      kpiHistory: string;
+-      dataSourceStatus: string;
+-      channelPerformance: string;
+-      monthlyActivitySummary: string;
+-    };
+-  };
++import { createSign } from "node:crypto";
++
++import { BaseConnector } from "./baseConnector.js";
++import type {
++  ConnectorAuthResult,
++  ConnectorMetadata,
++  ConnectorRunContext,
++  RawConnectorMetric
++} from "./types.js";
++
++interface ServiceAccount {
++  client_email: string;
++  private_key: string;
++  token_uri?: string;
+ }
+ 
+-export function loadConfig(): AppConfig {
+-  loadEnvFiles();
+-
+-  const missing: string[] = [];
+-  const airtableApiKey = readOptionalString("AIRTABLE_PAT") ?? readOptionalString("AIRTABLE_API_KEY");
+-  const airtableBaseId = readOptionalString("AIRTABLE_BASE_ID");
+-
+-  if (!airtableApiKey) {
+-    missing.push("AIRTABLE_PAT");
+-  }
+-
+-  if (!airtableBaseId) {
+-    missing.push("AIRTABLE_BASE_ID");
+-  }
+-
+-  if (missing.length > 0) {
+-    throw new AppError(
+-      "MISSING_ENV",
+-      `Missing required environment variables: ${missing.join(", ")}`,
+-      { missing }
+-    );
+-  }
+-
+-  return {
+-    nodeEnv: readString("NODE_ENV", "development"),
+-    host: readString("HOST", "0.0.0.0"),
+-    port: readInteger("PORT", 3000),
+-    logLevel: readLogLevel("LOG_LEVEL", "info"),
+-    frontendOrigin: readString("FRONTEND_ORIGIN", "*"),
+-    syncApiKey: readOptionalString("SYNC_API_KEY"),
+-    ga4: {
+-      propertyId: readOptionalString("GA4_PROPERTY_ID"),
+-      serviceAccountJson: readOptionalString("GA4_SERVICE_ACCOUNT_JSON"),
+-      configured: Boolean(
+-        readOptionalString("GA4_PROPERTY_ID") && readOptionalString("GA4_SERVICE_ACCOUNT_JSON")
+-      )
+-    },
+-    mailchimp: {
+-      apiKey: readOptionalString("MAILCHIMP_API_KEY"),
+-      serverPrefix: readOptionalString("MAILCHIMP_SERVER_PREFIX"),
+-      audienceId: readOptionalString("MAILCHIMP_AUDIENCE_ID"),
+-      apiBaseUrl: readOptionalString("MAILCHIMP_API_BASE_URL"),
+-      configured: Boolean(
+-        readOptionalString("MAILCHIMP_API_KEY") &&
+-        readOptionalString("MAILCHIMP_SERVER_PREFIX") &&
+-        readOptionalString("MAILCHIMP_AUDIENCE_ID")
+-      )
+-    },
+-    buffer: {
+-  accessToken: readOptionalString("BUFFER_ACCESS_TOKEN"),
+-  apiBaseUrl: readOptionalString("BUFFER_API_BASE_URL"),
+-  organizationId: readOptionalString("BUFFER_ORGANIZATION_ID"),
+-  configured: Boolean(
+-    readOptionalString("BUFFER_ACCESS_TOKEN")
+-  )
+-},
+-
+-    airtable: {
+-      apiKey: airtableApiKey!,
+-      baseId: airtableBaseId!,
+-      apiBaseUrl: readString("AIRTABLE_API_BASE_URL", "https://api.airtable.com/v0"),
+-      rateLimitMs: readInteger("AIRTABLE_RATE_LIMIT_MS", 250),
+-      cacheTtlMs: readInteger("AIRTABLE_CACHE_TTL_MS", 60000),
+-      tables: {
+-        kpiSources: readString("AIRTABLE_TABLE_KPI_SOURCES", "KPI Sources"),
+-        kpis: readString("AIRTABLE_TABLE_KPIS", "KPIs"),
+-        kpiRecords: readString("AIRTABLE_TABLE_KPI_RECORDS", "KPI Records"),
+-        importJobs: readString("AIRTABLE_TABLE_IMPORT_JOBS", "Import Jobs"),
+-        dashboardViews: readString("AIRTABLE_TABLE_DASHBOARD_VIEWS", "Dashboard Views"),
+-        alerts: readString("AIRTABLE_TABLE_ALERTS", "Alerts"),
+-        spotifyWeeklySnapshot: readString(
+-          "AIRTABLE_TABLE_SPOTIFY_WEEKLY_SNAPSHOT",
+-          "Spotify_Weekly_Snapshot"
+-        ),
+-spotifyEpisodeMetrics: readString(
+-  "AIRTABLE_TABLE_SPOTIFY_EPISODE_METRICS",
+-  "Spotify_Episode_Metrics"
+-),
+-        bufferPostMetrics: readString(
+-          "AIRTABLE_TABLE_BUFFER_POST_METRICS",
+-          "Buffer_Post_Metrics"
+-        ),
+-       
+-        contentPerformance: readString(
+-          "AIRTABLE_TABLE_CONTENT_PERFORMANCE",
+-          "Content_Performance"
+-        ),
+-        kpiHistory: readString("AIRTABLE_TABLE_KPI_HISTORY", "KPI_History"),
+-        dataSourceStatus: readString(
+-          "AIRTABLE_TABLE_DATA_SOURCE_STATUS",
+-          "Data_Source_Status"
+-        ),
+-        channelPerformance: readString(
+-          "AIRTABLE_TABLE_CHANNEL_PERFORMANCE",
+-          "Channel_Performance"
+-        ),
+-        monthlyActivitySummary: readString(
+-          "AIRTABLE_TABLE_MONTHLY_ACTIVITY_SUMMARY",
+-          "Monthly_Activity_Summary"
+-        )
+-      }
+-    }
+-  };
++interface GaRow {
++  dimensionValues?: Array<{ value?: string }>;
++  metricValues?: Array<{ value?: string }>;
+ }
+ 
++export class WebsiteConnector extends BaseConnector {
++  readonly metadata: ConnectorMetadata = {
++    id: "website",
++    name: "Google Analytics 4 Connector",
++    sourceName: "Google Analytics",
++    category: "website",
++    mode: "api",
++    enabled: true,
++    description: "Imports GA4 click activity for Website, Voice of Elim, and Elim Updates."
++  };
+ 
+-
+-function loadEnvFiles(): void {
+-  const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+-  const repoRoot = resolve(backendRoot, "..", "..");
+-  const candidates = new Set([
+-    resolve(repoRoot, ".env"),
+-    resolve(backendRoot, ".env"),
+-    resolve(process.cwd(), ".env"),
+-    resolve(repoRoot, ".env.local"),
+-    resolve(backendRoot, ".env.local"),
+-    resolve(process.cwd(), ".env.local")
+-  ]);
+-
+-  for (const filePath of candidates) {
+-    loadEnvFile(filePath);
+-  }
+-}
+-
+-function loadEnvFile(filePath: string): void {
+-  if (!existsSync(filePath)) {
+-    return;
+-  }
+-
+-  const contents = readFileSync(filePath, "utf8");
+-  for (const line of contents.split(/\r?\n/)) {
+-    const entry = parseEnvLine(line);
+-    if (!entry) {
+-      continue;
++  async authenticate(context: ConnectorRunContext): Promise<ConnectorAuthResult> {
++    if (!context.config.ga4.configured) {
++      return { ok: false, status: "Needs Setup", message: "GA4_PROPERTY_ID or GA4_SERVICE_ACCOUNT_JSON is missing." };
+     }
+ 
+-    const [key, value] = entry;
+-    if (process.env[key] === undefined) {
+-      process.env[key] = value;
++    try {
++      const account = parseServiceAccount(context.config.ga4.serviceAccountJson!);
++      await getAccessToken(account);
++      return { ok: true, status: "Connected", message: `Connected to GA4 property ${context.config.ga4.propertyId}.` };
++    } catch (error) {
++      return { ok: false, status: "Error", message: error instanceof Error ? error.message : String(error) };
+     }
+   }
+-}
+ 
+-function parseEnvLine(line: string): [string, string] | undefined {
+-  const trimmed = line.trim();
+-  if (!trimmed || trimmed.startsWith("#")) {
+-    return undefined;
+-  }
+-
+-  const withoutExport = trimmed.startsWith("export ") ? trimmed.slice(7).trim() : trimmed;
+-  const separatorIndex = withoutExport.indexOf("=");
+-  if (separatorIndex === -1) {
+-    return undefined;
+-  }
++  async fetchMetrics(context: ConnectorRunContext): Promise<RawConnectorMetric[]> {
++    const account = parseServiceAccount(context.config.ga4.serviceAccountJson!);
++    const token = await getAccessToken(account);
++    const propertyId = context.config.ga4.propertyId!;
++    const response = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`, {
++      method: "POST",
++      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
++      body: JSON.stringify({
++        dateRanges: [{ startDate: "90daysAgo", endDate: "today" }],
++        dimensions: [{ name: "date" }, { name: "pagePath" }, { name: "eventName" }],
++        metrics: [{ name: "eventCount" }],
++        dimensionFilter: { filter: { fieldName: "eventName", stringFilter: { matchType: "EXACT", value: "click" } } },
++        limit: 100000
++      })
++    });
++
++    if (!response.ok) {
++      throw new Error(`GA4 Data API ${response.status}: ${await response.text()}`);
++    }
+ 
+-  const key = withoutExport.slice(0, separatorIndex).trim();
+-  let value = withoutExport.slice(separatorIndex + 1).trim();
++    const data = await response.json() as { rows?: GaRow[] };
++    const daily = new Map<string, number>();
++    for (const row of data.rows ?? []) {
++      const rawDate = row.dimensionValues?.[0]?.value ?? "";
++      const pagePath = row.dimensionValues?.[1]?.value ?? "";
++      const value = Number(row.metricValues?.[0]?.value ?? 0);
++      const date = gaDate(rawDate);
++      if (!date || !Number.isFinite(value)) continue;
++      const channel = classifyChannel(pagePath);
++      const key = `${date}|${channel}`;
++      daily.set(key, (daily.get(key) ?? 0) + value);
++    }
+ 
+-  if (!key) {
+-    return undefined;
++    const metrics = [...daily.entries()].map(([key, value]) => {
++      const [date, channel] = key.split("|");
++      return {
++        sourceRecordId: `ga4:${propertyId}:${channel}:${date}:clicks`,
++        metricName: `${channel} Clicks`,
++        value,
++        unit: "clicks",
++        date,
++        targetTableKey: "channelPerformance" as const,
++        platform: channel === "Website" ? "Website" : channel,
++        channel,
++        contentType: "GA4 Web Activity"
++      };
++    });
++
++    context.logger.info("GA4 metrics fetched", { propertyId, rows: data.rows?.length ?? 0, normalizedMetrics: metrics.length });
++    return metrics;
+   }
+ 
+-  if (
+-    (value.startsWith("\"") && value.endsWith("\"")) ||
+-    (value.startsWith("'") && value.endsWith("'"))
+-  ) {
+-    value = value.slice(1, -1);
++  protected async getMockMetrics(_context: ConnectorRunContext): Promise<RawConnectorMetric[]> {
++    return [];
+   }
+-
+-  return [key, value.replace(/\\n/g, "\n")];
+ }
+ 
+-function readOptionalString(key: string): string | undefined {
+-  const value = process.env[key]?.trim();
+-  return value ? value : undefined;
++function classifyChannel(pagePath: string): "Website" | "Voice of Elim" | "Elim Updates" {
++  const path = pagePath.toLowerCase();
++  if (path.includes("voice-of-elim") || path.includes("voice_of_elim") || path.includes("voiceofelim")) return "Voice of Elim";
++  if (path.includes("elim-updates") || path.includes("elim_updates") || path.includes("elimupdates")) return "Elim Updates";
++  return "Website";
+ }
+ 
+-function readString(key: string, fallback: string): string {
+-  return readOptionalString(key) ?? fallback;
++function gaDate(value: string): string | undefined {
++  if (!/^\d{8}$/.test(value)) return undefined;
++  return `${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)}`;
+ }
+ 
+-function readInteger(key: string, fallback: number): number {
+-  const raw = readOptionalString(key);
+-  if (!raw) {
+-    return fallback;
+-  }
+-
+-  const value = Number.parseInt(raw, 10);
+-  if (!Number.isFinite(value)) {
+-    throw new Error(`${key} must be an integer`);
+-  }
+-
+-  return value;
++function parseServiceAccount(raw: string): ServiceAccount {
++  let parsed: unknown;
++  try { parsed = JSON.parse(raw); } catch { throw new Error("GA4_SERVICE_ACCOUNT_JSON is not valid JSON."); }
++  const account = parsed as Partial<ServiceAccount>;
++  if (!account.client_email || !account.private_key) throw new Error("GA4 service account JSON is missing client_email or private_key.");
++  return account as ServiceAccount;
+ }
+ 
+-function readLogLevel(key: string, fallback: LogLevel): LogLevel {
+-  const value = readString(key, fallback);
+-  if (value === "debug" || value === "info" || value === "warn" || value === "error") {
+-    return value;
+-  }
++async function getAccessToken(account: ServiceAccount): Promise<string> {
++  const now = Math.floor(Date.now() / 1000);
++  const tokenUri = account.token_uri ?? "https://oauth2.googleapis.com/token";
++  const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
++  const claim = base64Url(JSON.stringify({ iss: account.client_email, scope: "https://www.googleapis.com/auth/analytics.readonly", aud: tokenUri, iat: now, exp: now + 3600 }));
++  const unsigned = `${header}.${claim}`;
++  const signer = createSign("RSA-SHA256");
++  signer.update(unsigned);
++  signer.end();
++  const assertion = `${unsigned}.${base64Url(signer.sign(account.private_key))}`;
++  const response = await fetch(tokenUri, {
++    method: "POST",
++    headers: { "Content-Type": "application/x-www-form-urlencoded" },
++    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion })
++  });
++  if (!response.ok) throw new Error(`Google OAuth ${response.status}: ${await response.text()}`);
++  const payload = await response.json() as { access_token?: string };
++  if (!payload.access_token) throw new Error("Google OAuth response did not contain an access token.");
++  return payload.access_token;
++}
+ 
+-  throw new Error(`${key} must be one of debug, info, warn, or error`);
++function base64Url(value: string | Buffer): string {
++  return Buffer.from(value).toString("base64url");
+ }
