@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config/env.js";
 import { toPublicError } from "./errors.js";
 import { createLogger, serializeError } from "./logging/logger.js";
+import { runStartupGa4Sync } from "./services/startupGa4Sync.js";
 
 try {
   const config = loadConfig();
@@ -14,6 +15,8 @@ try {
       port: config.port,
       nodeEnv: config.nodeEnv
     });
+
+    void runStartupGa4Sync(config, logger.child("startup-ga4"));
   });
 
   server.on("error", (error) => {
