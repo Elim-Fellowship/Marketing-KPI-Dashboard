@@ -1,5 +1,6 @@
 let websiteActiveUsersRequest = 0;
-let websiteActiveUsersSignature = "";
+let websiteActiveUsersPendingSignature = "";
+const websiteActiveUsersCache = new Map();
 
 function formatChannelCount(value) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Number(value) || 0);
@@ -19,10 +20,7 @@ function channelDateRange() {
     const month = document.querySelector("#channel-month")?.value;
     if (!/^\d{4}-\d{2}$/.test(month ?? "")) return null;
     const [year, monthNumber] = month.split("-").map(Number);
-    return {
-      startDate: `${month}-01`,
-      endDate: formatDate(new Date(year, monthNumber, 0))
-    };
+    return { startDate: `${month}-01`, endDate: formatDate(new Date(year, monthNumber, 0)) };
   }
 
   if (mode === "quarter") {
@@ -30,8 +28,7 @@ function channelDateRange() {
     const match = /^(\d{4})-Q([1-4])$/.exec(quarter ?? "");
     if (!match) return null;
     const year = Number(match[1]);
-    const quarterNumber = Number(match[2]);
-    const startMonth = (quarterNumber - 1) * 3;
+    const startMonth = (Number(match[2]) - 1) * 3;
     return {
       startDate: formatDate(new Date(year, startMonth, 1)),
       endDate: formatDate(new Date(year, startMonth + 3, 0))
@@ -51,12 +48,25 @@ function channelDateRange() {
   };
 }
 
-async function applyWebsiteActiveUsers(card) {
+function setWebsiteActiveUsers(value) {
+  const currentWebsiteCard = Array.from(document.querySelectorAll(".breakdown-card")).find(
+    (item) => item.querySelector(".channel-label")?.textContent?.trim().toLowerCase() === "website"
+  );
+  const volumeValue = currentWebsiteCard?.querySelector(".breakdown-volume strong");
+  const formatted = formatChannelCount(value);
+  if (volumeValue && volumeValue.textContent !== formatted) volumeValue.textContent = formatted;
+}
+
+async function applyWebsiteActiveUsers() {
   const range = channelDateRange();
   if (!range) return;
   const signature = `${range.startDate}:${range.endDate}`;
-  if (signature === websiteActiveUsersSignature) return;
-  websiteActiveUsersSignature = signature;
+  if (websiteActiveUsersCache.has(signature)) {
+    setWebsiteActiveUsers(websiteActiveUsersCache.get(signature));
+    return;
+  }
+  if (websiteActiveUsersPendingSignature === signature) return;
+  websiteActiveUsersPendingSignature = signature;
   const requestId = ++websiteActiveUsersRequest;
 
   try {
@@ -66,14 +76,10 @@ async function applyWebsiteActiveUsers(card) {
     const payload = await response.json();
     const activeUsers = (payload.engagementCards ?? []).find((item) => item.id === "website_active_users");
     if (!activeUsers?.hasData || requestId !== websiteActiveUsersRequest) return;
-
-    const currentWebsiteCard = Array.from(document.querySelectorAll(".breakdown-card")).find(
-      (item) => item.querySelector(".channel-label")?.textContent?.trim().toLowerCase() === "website"
-    );
-    const volumeValue = currentWebsiteCard?.querySelector(".breakdown-volume strong");
-    if (volumeValue) volumeValue.textContent = formatChannelCount(activeUsers.currentValue);
-  } catch {
-    websiteActiveUsersSignature = "";
+    websiteActiveUsersCache.set(signature, activeUsers.currentValue);
+    setWebsiteActiveUsers(activeUsers.currentValue);
+  } finally {
+    if (websiteActiveUsersPendingSignature === signature) websiteActiveUsersPendingSignature = "";
   }
 }
 
@@ -91,20 +97,14 @@ function applyChannelActivityLabels() {
     if (!channelName || !volumeLabel) return;
 
     const label = labels[channelName];
-    if (label && volumeLabel.textContent !== label) {
-      volumeLabel.textContent = label;
-    }
-
-    if (channelName === "website") void applyWebsiteActiveUsers(card);
+    if (label && volumeLabel.textContent !== label) volumeLabel.textContent = label;
+    if (channelName === "website") void applyWebsiteActiveUsers();
   });
 }
 
 const pageRoot = document.querySelector("#page-root");
 if (pageRoot) {
-  const observer = new MutationObserver(() => {
-    websiteActiveUsersSignature = "";
-    applyChannelActivityLabels();
-  });
+  const observer = new MutationObserver(applyChannelActivityLabels);
   observer.observe(pageRoot, { childList: true, subtree: true });
 }
 applyChannelActivityLabels();
