@@ -97,7 +97,7 @@ export class CommunicationsAnalyticsService {
     endDate?: string;
     dateMode?: string;
   } = {}): Promise<Record<string, unknown>> {
-    const [kpiHistory, status, spotify, contentPerformance, monthlyActivitySummaryRows] = await Promise.all([
+    const [kpiHistory, status, spotify, contentPerformance, monthlyActivitySummaryRows, bufferPostMetrics] = await Promise.all([
       this.airtable.getRecords("kpiHistory", {
         maxRecords: 200
       }),
@@ -112,6 +112,9 @@ export class CommunicationsAnalyticsService {
       }),
       this.airtable.getRecords("monthlyActivitySummary", {
         maxRecords: 100
+      }),
+      this.airtable.getRecords("bufferPostMetrics", {
+        maxRecords: 1000
       })
     ]);
     const dateRange = normalizeDateRange(query.startDate, query.endDate, query.dateMode);
@@ -153,6 +156,22 @@ export class CommunicationsAnalyticsService {
       filteredKpiHistory,
       filteredContentPerformance
     );
+    // A published-post marker is a separate source of activity, not engagement.
+    // Only fill the social count when no authoritative monthly or KPI count exists.
+    const publishedBuffer = filterRecordsByDate(bufferPostMetrics, ["Metric Date", "Date"], dateRange)
+      .filter((record) => stringField(record.fields, ["Metric Name"], "").toLowerCase() === "post published");
+    const socialSummaryHasValue = filteredMonthlyActivitySummary.some((record) =>
+      ["Social Posts Published", "Posts Published"].some((field) => record.fields[field] !== undefined)
+    ) || selectAuthoritativeKpiRecord(filteredKpiHistory, ["social posts published", "social posts", "posts published"]) !== null;
+    if (!socialSummaryHasValue && publishedBuffer.length > 0) {
+      const count = new Set(publishedBuffer.map((record) =>
+        stringField(record.fields, ["Source Record ID"], record.id).split(":post published:")[0]
+      )).size;
+      const items = monthlyActivitySummary.items as Record<string, unknown>;
+      items.socialPostsPublished = { value: count, available: true, source: "Buffer_Post_Metrics" };
+      monthlyActivitySummary.socialPostsPublished = count;
+      monthlyActivitySummary.hasData = true;
+    }
 
     return {
       communicationsIntelligenceModel: {
