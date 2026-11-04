@@ -223,8 +223,23 @@ export class BufferConnector extends BaseConnector {
 
     const metrics: RawConnectorMetric[] = [];
     for (const post of eligiblePosts) {
-      if (!post.metrics) continue;
-      for (const metric of post.metrics) {
+      // Preserve publishing activity even when Buffer has not returned analytics.
+      // This marker is not an engagement metric and must not be summed as one.
+      metrics.push({
+        sourceRecordId: post.id,
+        metricName: "Post Published",
+        value: 1,
+        unit: "count",
+        date: post.sentAt,
+        targetTableKey: "bufferPostMetrics",
+        platform: "Buffer",
+        channel: post.channelService,
+        contentTitle: post.text.slice(0, 100),
+        contentType: "Social Post",
+        activityVolume: 1,
+        dimensions: { channelId: post.channelId }
+      });
+      for (const metric of post.metrics ?? []) {
         metrics.push({
           sourceRecordId: post.id,
           metricName: metric.name,
